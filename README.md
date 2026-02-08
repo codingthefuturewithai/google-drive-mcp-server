@@ -2,6 +2,19 @@
 
 An MCP (Model Context Protocol) server that gives AI coding assistants the ability to search, browse, download, upload, and organize files on Google Drive. Binary content never enters the MCP protocol — files are transferred to/from the local filesystem.
 
+## Getting Started with AI Assistants
+
+If you're using this server with an AI coding assistant (Claude Code, Cline, etc.), start here:
+
+| Command | What it does |
+|---------|-------------|
+| `/server-overview` | Scan the server and show all tools, deployment options, and configuration |
+| `/getting-started` | Interactive guided tour — choose your path based on experience level |
+| `/add-tool "description"` | Design and implement a new MCP tool with planning step |
+| `/generate-tests tool_name` | Auto-generate unit and integration tests for a tool |
+
+These slash commands are the fastest way to understand what the server can do and how to use it.
+
 ## Quick Start for MCP Clients
 
 There are two ways to run the server: **direct install** or **Docker container**. Both require Google OAuth credentials.
@@ -19,7 +32,7 @@ There are two ways to run the server: **direct install** or **Docker container**
 
 ```bash
 # Clone the repo
-git clone <repository-url>
+git clone https://github.com/codingthefuturewithai/google-drive-mcp-server.git
 cd google_drive
 uv sync
 
@@ -74,55 +87,16 @@ Once configured, you can ask your AI assistant to:
 
 ## Available Tools
 
-### search_files
+| Tool | Purpose |
+|------|---------|
+| **search_files** | Search by name or with structured Drive API queries |
+| **list_folder** | List folder contents with folders sorted first |
+| **download_file** | Download/export files to local filesystem |
+| **upload_file** | Upload local files to Drive |
+| **get_file_info** | Get detailed file metadata |
+| **create_folder** | Create folders on Drive |
 
-Search for files on Google Drive by name or with structured Drive API queries.
-
-**Parameters:**
-- `query` (required, string): Search text or Drive API query string
-- `max_results` (optional, int, default 20): Maximum results (1–100)
-- `file_type` (optional, string): Filter by type — `document`, `spreadsheet`, `presentation`, `folder`, `pdf`, `image`, `video`, `audio`
-
-### list_folder
-
-List immediate contents of a Google Drive folder, with folders sorted first.
-
-**Parameters:**
-- `folder_id` (optional, string, default "root"): Folder ID to list
-- `max_results` (optional, int, default 50): Maximum results (1–100)
-
-### download_file
-
-Download a file from Google Drive to the local filesystem. Google Workspace files (Docs, Sheets, Slides) are exported to the requested format.
-
-**Parameters:**
-- `file_id` (required, string): Google Drive file ID
-- `local_path` (optional, string): Destination path. If empty, saves to `~/Downloads/google_drive/`
-- `export_format` (optional, string): Export format for Workspace files — `pdf`, `docx`, `xlsx`, `csv`, `pptx`, `txt`, `html`
-
-### upload_file
-
-Upload a local file to Google Drive.
-
-**Parameters:**
-- `local_path` (required, string): Path to the local file
-- `folder_id` (optional, string, default "root"): Destination folder ID on Drive
-- `file_name` (optional, string): Override filename on Drive
-
-### get_file_info
-
-Get detailed metadata for a file (name, type, size, dates, owner, sharing, link, export formats).
-
-**Parameters:**
-- `file_id` (required, string): Google Drive file ID
-
-### create_folder
-
-Create a new folder on Google Drive.
-
-**Parameters:**
-- `folder_name` (required, string): Name for the new folder
-- `parent_folder_id` (optional, string, default "root"): Parent folder ID
+For full parameter details, run `/server-overview` from your AI assistant or see [SETUP_PROMPT.md](SETUP_PROMPT.md).
 
 ## Features
 
@@ -150,8 +124,6 @@ Downloads go to `~/Downloads/google_drive/` by default (configurable).
 
 ## Troubleshooting
 
-### Common Issues
-
 1. **"client_secret.json not found" error**
    - Ensure you've downloaded OAuth credentials from Google Cloud Console
    - Place the file in the config directory shown by: `python -c "import platformdirs; print(platformdirs.user_config_dir('google_drive'))"`
@@ -172,21 +144,11 @@ Downloads go to `~/Downloads/google_drive/` by default (configurable).
 
 ## Development
 
-```bash
-# Run all tests
-uv run pytest
+For development setup, testing, and contribution guidelines, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-# Run unit tests only
-uv run pytest tests/unit/ -v
+## AI Assistant Configuration
 
-# Run integration tests (tests both STDIO and Streamable HTTP transports)
-uv run pytest tests/integration/ -v
-
-# Start MCP Inspector for manual testing
-uv run mcp dev google_drive/server/app.py
-```
-
-For development setup and contribution guidelines, see [DEVELOPMENT.md](DEVELOPMENT.md).
+For detailed setup instructions for AI coding assistants, see [SETUP_PROMPT.md](SETUP_PROMPT.md).
 
 ## Requirements
 
