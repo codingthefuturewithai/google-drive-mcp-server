@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  google-drive:
+    build: .
+    container_name: google-drive-mcp
+    ports:
+      - "${GOOGLE_DRIVE_PORT:-19001}:3001"
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PORT=3001
+    volumes:
+      - google_drive_config:/home/appuser/.config/google_drive
+      - google_drive_data:/home/appuser/.local/share/google_drive
+      - google_drive_logs:/home/appuser/.local/state/google_drive
+      - google_drive_downloads:/home/appuser/Downloads/google_drive
+    restart: unless-stopped
+
+volumes:
+  google_drive_config:
+  google_drive_data:
+  google_drive_logs:
+  google_drive_downloads:
