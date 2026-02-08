@@ -70,8 +70,5 @@ dmypy.json
 *.log
 logs/
 
-# Claude Code
-.claude/
-
 # Stale standalone scripts
 test_correlation_id_integration.py
