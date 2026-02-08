@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 import platformdirs
 
@@ -102,14 +102,60 @@ def is_port_available(port: int) -> bool:
         return True
 
 
-def find_available_port(start_port: int = BASE_PORT) -> int:
-    """Find first available port starting from start_port"""
-    port = start_port
-    for _ in range(100):
+def find_available_port() -> int:
+    """Find an available port starting from BASE_PORT.
+
+    Used ONLY by 'start'. Scans BASE_PORT, BASE_PORT+1, ... up to +10.
+    Respects GOOGLE_DRIVE_PORT env var as an explicit override.
+    """
+    env_port = os.getenv("GOOGLE_DRIVE_PORT")
+    if env_port:
+        port = int(env_port)
         if is_port_available(port):
             return port
-        port += 1
-    raise RuntimeError(f"No available ports found in range {start_port}-{start_port+99}")
+        print_error(f"GOOGLE_DRIVE_PORT={port} is already in use.")
+        print_info("Free the port or choose a different one.")
+        sys.exit(1)
+
+    for offset in range(11):
+        candidate = BASE_PORT + offset
+        if is_port_available(candidate):
+            return candidate
+
+    print_error(f"No available port found in range {BASE_PORT}-{BASE_PORT + 10}")
+    print_info(f"Set an explicit port: {Colors.CYAN}GOOGLE_DRIVE_PORT=19020 python scripts/docker.py start{Colors.RESET}")
+    sys.exit(1)
+
+
+def require_saved_port(command_name: str) -> int:
+    """Return the saved port from state, or fail loudly.
+
+    Used by 'restart' and 'update' — these must reuse the port from 'start'.
+    """
+    state = load_state()
+    port = state.get("port")
+
+    if port is None:
+        print_error("No saved port found — the container has never been started.")
+        print_info(f"Run {Colors.CYAN}python scripts/docker.py start{Colors.RESET} first.")
+        sys.exit(1)
+
+    if not is_port_available(port):
+        # Check if it's our own container occupying the port (that's fine for restart/update)
+        exists, running, _ = get_container_status()
+        if running:
+            # Our container is using it — we'll stop it before restarting
+            return port
+
+        print_error(f"Saved port {port} is in use by another process.")
+        print_info("Check what's using it:")
+        print(f"  {Colors.CYAN}lsof -i :{port}{Colors.RESET}  (macOS/Linux)")
+        print(f"  {Colors.CYAN}netstat -ano | findstr :{port}{Colors.RESET}  (Windows)")
+        print()
+        print_info(f"Free the port, or re-run: {Colors.CYAN}python scripts/docker.py start{Colors.RESET} to pick a new one.")
+        sys.exit(1)
+
+    return port
 
 
 def load_state() -> dict:
@@ -254,11 +300,8 @@ def build_image() -> bool:
     return True
 
 
-def start_container(port: Optional[int] = None) -> bool:
-    """Start the container"""
-    if port is None:
-        port = find_available_port()
-
+def start_container(port: int) -> bool:
+    """Start the container on the given port."""
     print_info(f"Starting container on port {port}...")
 
     code, _, stderr = run_command([
@@ -393,8 +436,7 @@ def cmd_restart():
     """Restart the container (without rebuild)"""
     print(f"\n{Colors.BOLD}{Colors.GREEN}Google Drive MCP - Restart{Colors.RESET}\n")
 
-    state = load_state()
-    port = state.get("port", BASE_PORT)
+    port = require_saved_port("restart")
 
     stop_container()
 
@@ -419,19 +461,16 @@ def cmd_update():
     if not check_docker_running():
         sys.exit(1)
 
-    state = load_state()
-    port = state.get("port")
-
     # Check if container exists
+    state = load_state()
     exists, _, _ = get_container_status()
-    if not exists and port is None:
+    if not exists and not state.get("port"):
         print_warning("No existing deployment found")
         print_info("Running 'start' instead...")
         cmd_start()
         return
 
-    if port is None:
-        port = find_available_port()
+    port = require_saved_port("update")
 
     print_header("Step 1: Stopping Container")
     if exists:

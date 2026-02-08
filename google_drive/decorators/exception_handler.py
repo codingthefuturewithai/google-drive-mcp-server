@@ -51,14 +51,20 @@ def exception_handler(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awai
             logger = UnifiedLogger.get_logger(f"tool.{func.__name__}")
             
             # Log the full traceback for debugging
+            # IMPORTANT: Do not embed traceback in the message string.
+            # Loguru interprets curly braces as format placeholders, so
+            # tracebacks containing {variable_name} cause KeyError.
             tb_str = traceback.format_exc()
-            logger.error(
-                f"Exception in {func.__name__}: {tb_str}",
+            logger.opt(depth=1).error(
+                "Exception in {tool}: {error}",
+                tool=func.__name__,
+                error=str(e),
                 log_type="tool_execution",
                 tool_name=func.__name__,
                 status="error",
                 error_message=str(e),
-                exception_type=type(e).__name__
+                exception_type=type(e).__name__,
+                traceback=tb_str
             )
             
             # Re-raise the exception for MCP to handle properly
