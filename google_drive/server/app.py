@@ -10,8 +10,10 @@ import sys
 from typing import Optional, Callable, Any
 
 import click
+import os
 from mcp import types
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from google_drive.config import ServerConfig, get_config
 from google_drive.logging_config import setup_logging, logger
@@ -75,7 +77,22 @@ def create_mcp_server(config: Optional[ServerConfig] = None) -> FastMCP:
     unified_logger.info(f"Unified logging initialized with {len(UnifiedLogger.get_available_destinations())} available destination types")
     unified_logger.info(f"Server config: {config.name} at log level {config.log_level}")
     
-    mcp_server = FastMCP(config.name or "Google Drive")
+    # Configure DNS rebinding protection (disabled by default for development)
+    dns_protection = os.getenv("MCP_DNS_REBINDING_PROTECTION", "false").lower() == "true"
+    allowed_hosts_env = os.getenv("MCP_ALLOWED_HOSTS", "")
+    allowed_hosts = [h.strip() for h in allowed_hosts_env.split(",") if h.strip()] if allowed_hosts_env else []
+
+    unified_logger.info(f"DNS rebinding protection: {'enabled' if dns_protection else 'disabled'}")
+    if dns_protection and allowed_hosts:
+        unified_logger.info(f"Allowed hosts: {allowed_hosts}")
+
+    mcp_server = FastMCP(
+        config.name or "Google Drive",
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=dns_protection,
+            allowed_hosts=allowed_hosts
+        )
+    )
     
     
     # Register all tools with the server

@@ -3,6 +3,7 @@
 Tools for downloading files from and uploading files to Google Drive.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -19,6 +20,92 @@ def _format_size(num_bytes: int) -> str:
             return f"{num_bytes:.1f} {unit}" if unit != "B" else f"{num_bytes} {unit}"
         num_bytes /= 1024
     return f"{num_bytes:.1f} PB"
+
+
+def _get_docker_mounts() -> dict:
+    """Load mount configuration from the GOOGLE_DRIVE_MOUNTS env var.
+
+    Returns empty dict when not running in Docker (GOOGLE_DRIVE_DOCKER unset),
+    meaning no mount restrictions apply.
+    """
+    if not os.environ.get("GOOGLE_DRIVE_DOCKER"):
+        return {}
+    mounts_json = os.environ.get("GOOGLE_DRIVE_MOUNTS", "")
+    if not mounts_json:
+        return {}
+    try:
+        return json.loads(mounts_json)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _check_path_accessible(file_path: str, need_write: bool = False) -> tuple:
+    """Check if a path is within a Docker-mounted directory.
+
+    Only enforced when GOOGLE_DRIVE_DOCKER=1 (container mode).
+    When running locally (stdio, MCP Inspector, etc.), always returns (True, "").
+
+    Args:
+        file_path: Absolute path to check.
+        need_write: If True, also verifies the mount is read-write.
+
+    Returns:
+        (is_accessible, message) — message explains the problem on failure.
+    """
+    mounts_config = _get_docker_mounts()
+    if not mounts_config:
+        # Not in Docker or no mount info — no restrictions
+        return True, ""
+
+    resolved = str(Path(file_path).resolve())
+
+    # Collect all accessible directories with their permissions
+    accessible_dirs = []
+
+    # Download dir is always read-write
+    download_dir = mounts_config.get("download_dir", "")
+    if download_dir:
+        accessible_dirs.append({"path": download_dir, "read_only": False})
+        if resolved.startswith(download_dir + "/") or resolved == download_dir:
+            return True, ""
+
+    # User-configured mounts
+    for mount in mounts_config.get("mounts", []):
+        host_path = mount.get("host_path", "")
+        read_only = mount.get("read_only", True)
+        if host_path:
+            accessible_dirs.append({"path": host_path, "read_only": read_only})
+            if resolved.startswith(host_path + "/") or resolved == host_path:
+                if need_write and read_only:
+                    lines = [
+                        f"Path '{file_path}' is in a read-only mount ({host_path}).",
+                        "",
+                        "To write to this directory, reconfigure with a read-write mount:",
+                        "  python scripts/setup.py --force",
+                        "",
+                        f"Or use the download directory instead: {download_dir}",
+                    ]
+                    return False, "\n".join(lines)
+                return True, ""
+
+    # Path is outside all mounted directories
+    lines = [
+        f"Path '{file_path}' is not accessible from the Docker container.",
+        "",
+        "Mounted directories:",
+    ]
+    for d in accessible_dirs:
+        label = "read-only" if d["read_only"] else "read-write"
+        lines.append(f"  - {d['path']} ({label})")
+
+    if not accessible_dirs:
+        lines.append("  (none configured)")
+
+    lines.append("")
+    lines.append("Move the file to one of these directories and try again.")
+    lines.append("Or run 'python scripts/setup.py --force' to add more directories.")
+
+    return False, "\n".join(lines)
 
 
 def _resolve_download_path(local_path: str, filename: str) -> Path:
@@ -69,6 +156,11 @@ async def download_file(file_id: str, local_path: str = "", export_format: str =
 
     dest = _resolve_download_path(local_path, filename)
 
+    # Validate the download destination is in a writable mount (Docker only)
+    accessible, msg = _check_path_accessible(str(dest), need_write=True)
+    if not accessible:
+        raise PermissionError(msg)
+
     final_path, bytes_written = await drive.download(file_id, dest, export_format=export_format)
 
     return (
@@ -90,6 +182,11 @@ async def upload_file(local_path: str, folder_id: str = "root", file_name: str =
         Confirmation with the uploaded file's Drive ID and link
     """
     path = Path(local_path)
+
+    # Validate the upload source is in a mounted directory (Docker only)
+    accessible, msg = _check_path_accessible(local_path, need_write=False)
+    if not accessible:
+        raise PermissionError(msg)
 
     if not path.exists():
         raise FileNotFoundError(f"Local file not found: {local_path}")

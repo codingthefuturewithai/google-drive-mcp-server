@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Google Drive Docker Manager
 
-Cross-platform script to manage the Google Drive MCP server Docker container.
+Non-interactive container lifecycle management. Reads configuration saved by
+setup.py and handles start/stop/restart/update.
+
+Prerequisites:
+    python scripts/setup.py    # Interactive first-time setup (run once)
 
 Usage:
     python scripts/docker.py start    # Build and start container
@@ -15,7 +19,7 @@ Usage:
 import argparse
 import json
 import os
-import shutil
+import platform
 import socket
 import subprocess
 import sys
@@ -39,7 +43,6 @@ class Colors:
 
 CONTAINER_NAME = "google-drive-mcp"
 IMAGE_NAME = "google-drive-mcp"
-BASE_PORT = 19001
 CONFIG_DIR = Path(platformdirs.user_config_dir("google_drive"))
 STATE_FILE = CONFIG_DIR / "docker.json"
 
@@ -102,62 +105,6 @@ def is_port_available(port: int) -> bool:
         return True
 
 
-def find_available_port() -> int:
-    """Find an available port starting from BASE_PORT.
-
-    Used ONLY by 'start'. Scans BASE_PORT, BASE_PORT+1, ... up to +10.
-    Respects GOOGLE_DRIVE_PORT env var as an explicit override.
-    """
-    env_port = os.getenv("GOOGLE_DRIVE_PORT")
-    if env_port:
-        port = int(env_port)
-        if is_port_available(port):
-            return port
-        print_error(f"GOOGLE_DRIVE_PORT={port} is already in use.")
-        print_info("Free the port or choose a different one.")
-        sys.exit(1)
-
-    for offset in range(11):
-        candidate = BASE_PORT + offset
-        if is_port_available(candidate):
-            return candidate
-
-    print_error(f"No available port found in range {BASE_PORT}-{BASE_PORT + 10}")
-    print_info(f"Set an explicit port: {Colors.CYAN}GOOGLE_DRIVE_PORT=19020 python scripts/docker.py start{Colors.RESET}")
-    sys.exit(1)
-
-
-def require_saved_port(command_name: str) -> int:
-    """Return the saved port from state, or fail loudly.
-
-    Used by 'restart' and 'update' — these must reuse the port from 'start'.
-    """
-    state = load_state()
-    port = state.get("port")
-
-    if port is None:
-        print_error("No saved port found — the container has never been started.")
-        print_info(f"Run {Colors.CYAN}python scripts/docker.py start{Colors.RESET} first.")
-        sys.exit(1)
-
-    if not is_port_available(port):
-        # Check if it's our own container occupying the port (that's fine for restart/update)
-        exists, running, _ = get_container_status()
-        if running:
-            # Our container is using it — we'll stop it before restarting
-            return port
-
-        print_error(f"Saved port {port} is in use by another process.")
-        print_info("Check what's using it:")
-        print(f"  {Colors.CYAN}lsof -i :{port}{Colors.RESET}  (macOS/Linux)")
-        print(f"  {Colors.CYAN}netstat -ano | findstr :{port}{Colors.RESET}  (Windows)")
-        print()
-        print_info(f"Free the port, or re-run: {Colors.CYAN}python scripts/docker.py start{Colors.RESET} to pick a new one.")
-        sys.exit(1)
-
-    return port
-
-
 def load_state() -> dict:
     """Load persisted state"""
     if STATE_FILE.exists():
@@ -172,6 +119,106 @@ def save_state(state: dict):
     """Save state to disk"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def convert_path_for_docker(path: str) -> str:
+    """Convert host path for Docker volume mounts.
+
+    On Windows, converts 'C:\\Users\\tim' to '/c/Users/tim' for Docker Desktop.
+    macOS and Linux paths pass through unchanged.
+    """
+    if platform.system() == "Windows" and len(path) >= 2 and path[1] == ":":
+        drive = path[0].lower()
+        rest = path[2:].replace("\\", "/")
+        return f"/{drive}{rest}"
+    return path
+
+
+def load_docker_config() -> dict:
+    """Load and validate the Docker configuration saved by setup.py.
+
+    Exits with a helpful message if setup hasn't been run or config is
+    in the old port-only format.
+    """
+    state = load_state()
+
+    if not state:
+        print_error("No Docker configuration found.")
+        print_info(f"Run setup first: {Colors.CYAN}python scripts/setup.py{Colors.RESET}")
+        sys.exit(1)
+
+    # Detect old-format docker.json (port only, no mounts)
+    if "mounts" not in state or "download_dir" not in state:
+        print_error("Docker configuration is incomplete (old format).")
+        print_info(f"Run setup to configure directory mounts:")
+        print(f"  {Colors.CYAN}python scripts/setup.py{Colors.RESET}")
+        sys.exit(1)
+
+    # Validate port
+    port = state.get("port")
+    if not port:
+        print_error("No port configured.")
+        print_info(f"Run setup: {Colors.CYAN}python scripts/setup.py --force{Colors.RESET}")
+        sys.exit(1)
+
+    return state
+
+
+def validate_port(port: int) -> int:
+    """Validate the saved port is usable, accounting for our own container.
+
+    Returns the port if available or occupied by our container.
+    Exits if the port is taken by another process.
+    """
+    if is_port_available(port):
+        return port
+
+    # Check if it's our own container occupying the port
+    exists, running, _ = get_container_status()
+    if running:
+        return port
+
+    print_error(f"Configured port {port} is in use by another process.")
+    print_info("Check what's using it:")
+    print(f"  {Colors.CYAN}lsof -i :{port}{Colors.RESET}  (macOS/Linux)")
+    print(f"  {Colors.CYAN}netstat -ano | findstr :{port}{Colors.RESET}  (Windows)")
+    print()
+    print_info(f"Reconfigure: {Colors.CYAN}python scripts/setup.py --force{Colors.RESET}")
+    sys.exit(1)
+
+
+def build_volume_args(config: dict) -> list:
+    """Build Docker -v flags from the saved configuration.
+
+    Named volumes:
+        google_drive_config  — OAuth creds, config.yaml
+        google_drive_data    — SQLite log DB
+        google_drive_logs    — Log files
+
+    Bind mounts:
+        download_dir  — at same host path in container (read-write)
+        mounts[]      — user directories at same host path in container
+    """
+    args = []
+
+    # Named volumes (unchanged)
+    args += ["-v", "google_drive_config:/home/appuser/.config/google_drive"]
+    args += ["-v", "google_drive_data:/home/appuser/.local/share/google_drive"]
+    args += ["-v", "google_drive_logs:/home/appuser/.local/state/google_drive"]
+
+    # Bind mount: download directory (read-write, same path in container)
+    download_dir = config["download_dir"]
+    docker_path = convert_path_for_docker(download_dir)
+    args += ["-v", f"{docker_path}:{docker_path}:rw"]
+
+    # Bind mounts: user-configured directories
+    for mount in config.get("mounts", []):
+        host_path = mount["host_path"]
+        container_path = mount.get("container_path", convert_path_for_docker(host_path))
+        mode = "ro" if mount.get("read_only", True) else "rw"
+        args += ["-v", f"{host_path}:{container_path}:{mode}"]
+
+    return args
 
 
 def get_container_status() -> Tuple[bool, bool, str]:
@@ -206,43 +253,6 @@ def check_docker_running() -> bool:
 
     print_error("Docker daemon is not running")
     print_info("Start Docker Desktop and try again")
-    return False
-
-
-def check_oauth_credentials() -> bool:
-    """Check if OAuth credentials exist in the config directory.
-
-    The container needs client_secret.json and token.json to authenticate
-    with Google Drive. These must be generated on the host first (the OAuth
-    flow requires a browser).
-    """
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    missing = [f for f in REQUIRED_CREDS if not (CONFIG_DIR / f).exists()]
-
-    if not missing:
-        print_success("OAuth credentials found")
-        return True
-
-    print_error("Missing Google OAuth credentials:")
-    for f in missing:
-        print_error(f"  - {CONFIG_DIR / f}")
-
-    print()
-    if "client_secret.json" in missing:
-        print_info("To get client_secret.json:")
-        print(f"  1. Go to https://console.cloud.google.com/")
-        print(f"  2. Enable the Google Drive API")
-        print(f"  3. Create OAuth client credentials (Desktop app)")
-        print(f"  4. Download the JSON and save as:")
-        print(f"     {Colors.CYAN}{CONFIG_DIR / 'client_secret.json'}{Colors.RESET}")
-        print()
-
-    if "token.json" in missing and "client_secret.json" not in missing:
-        print_info("To generate token.json (run on host, needs browser):")
-        print(f"  {Colors.CYAN}cd {Path(__file__).parent.parent}{Colors.RESET}")
-        print(f"  {Colors.CYAN}uv run python -c \"from google_drive.auth import get_credentials; import platformdirs; get_credentials(platformdirs.user_config_dir('google_drive'))\"{Colors.RESET}")
-        print()
-
     return False
 
 
@@ -300,30 +310,38 @@ def build_image() -> bool:
     return True
 
 
-def start_container(port: int) -> bool:
-    """Start the container on the given port."""
+def start_container(config: dict) -> bool:
+    """Start the container using the saved configuration."""
+    port = config["port"]
     print_info(f"Starting container on port {port}...")
 
-    code, _, stderr = run_command([
+    # Serialize config as JSON env var so the MCP server can read mount info
+    mounts_json = json.dumps({
+        "download_dir": config["download_dir"],
+        "mounts": config.get("mounts", []),
+    })
+
+    cmd = [
         "docker", "run", "-d",
         "--name", CONTAINER_NAME,
         "-p", f"{port}:3001",
         "-e", "PORT=3001",
         "-e", f"LOG_LEVEL={os.getenv('LOG_LEVEL', 'INFO')}",
-        "-v", "google_drive_config:/home/appuser/.config/google_drive",
-        "-v", "google_drive_data:/home/appuser/.local/share/google_drive",
-        "-v", "google_drive_logs:/home/appuser/.local/state/google_drive",
-        "-v", "google_drive_downloads:/home/appuser/Downloads/google_drive",
-        "--restart", "unless-stopped",
-        IMAGE_NAME
-    ])
+        "-e", "GOOGLE_DRIVE_DOCKER=1",
+        "-e", f"GOOGLE_DRIVE_MOUNTS={mounts_json}",
+    ]
+
+    # Add volume mounts
+    cmd += build_volume_args(config)
+
+    cmd += ["--restart", "unless-stopped", IMAGE_NAME]
+
+    code, _, stderr = run_command(cmd)
 
     if code != 0:
         print_error(f"Failed to start container: {stderr}")
         return False
 
-    # Save state
-    save_state({"port": port})
     print_success(f"Container started on port {port}")
     return True
 
@@ -365,6 +383,8 @@ def verify_health(timeout_seconds: int = 60) -> bool:
     return False
 
 
+# ── Commands ─────────────────────────────────────────────────────────────────
+
 def cmd_start():
     """Build and start the container"""
     print(f"\n{Colors.BOLD}{Colors.GREEN}Google Drive MCP - Start{Colors.RESET}\n")
@@ -372,8 +392,8 @@ def cmd_start():
     # Check if already running
     exists, running, _ = get_container_status()
     if running:
-        state = load_state()
-        port = state.get("port", BASE_PORT)
+        config = load_docker_config()
+        port = config["port"]
         print_warning("Container already running")
         print_info(f"MCP endpoint: http://localhost:{port}/mcp")
         print_info("Use 'update' to rebuild and restart, or 'restart' to just restart")
@@ -382,32 +402,28 @@ def cmd_start():
     if not check_docker_running():
         sys.exit(1)
 
-    # Check OAuth credentials before building
-    print_header("Step 1: Checking OAuth Credentials")
-    if not check_oauth_credentials():
-        print_error("Cannot start without Google OAuth credentials.")
-        print_info("Set up credentials first, then run 'start' again.")
-        sys.exit(1)
+    # Load and validate setup config
+    config = load_docker_config()
+    port = validate_port(config["port"])
 
     # Remove stopped container if exists
     if exists and not running:
         print_info("Removing stopped container...")
         run_command(["docker", "rm", CONTAINER_NAME])
 
-    print_header("Step 2: Building Image")
+    print_header("Step 1: Building Image")
     if not build_image():
         sys.exit(1)
 
-    print_header("Step 3: Copying Credentials")
+    print_header("Step 2: Copying Credentials")
     if not copy_credentials_to_volume():
         sys.exit(1)
 
-    print_header("Step 4: Starting Container")
-    port = find_available_port()
-    if not start_container(port):
+    print_header("Step 3: Starting Container")
+    if not start_container(config):
         sys.exit(1)
 
-    print_header("Step 5: Verifying Health")
+    print_header("Step 4: Verifying Health")
     verify_health(timeout_seconds=60)
 
     # Success summary
@@ -436,12 +452,13 @@ def cmd_restart():
     """Restart the container (without rebuild)"""
     print(f"\n{Colors.BOLD}{Colors.GREEN}Google Drive MCP - Restart{Colors.RESET}\n")
 
-    port = require_saved_port("restart")
+    config = load_docker_config()
+    validate_port(config["port"])
 
     stop_container()
 
     print_header("Starting Container")
-    if not start_container(port):
+    if not start_container(config):
         sys.exit(1)
 
     print_header("Verifying Health")
@@ -449,7 +466,7 @@ def cmd_restart():
 
     print_header("Restart Complete")
     print_success("Container restarted successfully")
-    print_info(f"MCP endpoint: http://localhost:{port}/mcp")
+    print_info(f"MCP endpoint: http://localhost:{config['port']}/mcp")
     print()
 
 
@@ -461,16 +478,10 @@ def cmd_update():
     if not check_docker_running():
         sys.exit(1)
 
-    # Check if container exists
-    state = load_state()
-    exists, _, _ = get_container_status()
-    if not exists and not state.get("port"):
-        print_warning("No existing deployment found")
-        print_info("Running 'start' instead...")
-        cmd_start()
-        return
+    config = load_docker_config()
+    validate_port(config["port"])
 
-    port = require_saved_port("update")
+    exists, _, _ = get_container_status()
 
     print_header("Step 1: Stopping Container")
     if exists:
@@ -487,7 +498,7 @@ def cmd_update():
         print_warning("Credential copy failed - container may not authenticate")
 
     print_header("Step 4: Starting Container")
-    if not start_container(port):
+    if not start_container(config):
         sys.exit(1)
 
     print_header("Step 5: Verifying Health")
@@ -496,7 +507,7 @@ def cmd_update():
     print_header("Update Complete")
     print_success("Google Drive MCP server updated with latest code!")
     print()
-    print_info(f"MCP endpoint: http://localhost:{port}/mcp")
+    print_info(f"MCP endpoint: http://localhost:{config['port']}/mcp")
     print()
     print_info("Useful commands:")
     print(f"  View logs:    {Colors.CYAN}python scripts/docker.py logs{Colors.RESET}")
@@ -514,11 +525,26 @@ def cmd_status():
 
     if not exists:
         print_info("Status: not deployed")
-        print_info("Run 'python scripts/docker.py start' to deploy")
+        if "mounts" in state:
+            print_info("Run 'python scripts/docker.py start' to deploy")
+        else:
+            print_info("Run 'python scripts/setup.py' first, then 'python scripts/docker.py start'")
     elif running:
         print_success(f"Status: {health}")
         print_info(f"Port: {port}")
         print_info(f"MCP endpoint: http://localhost:{port}/mcp")
+
+        # Show mount info
+        download_dir = state.get("download_dir")
+        mounts = state.get("mounts", [])
+        if download_dir:
+            print()
+            print_info(f"Download dir: {download_dir}")
+        if mounts:
+            print_info("Mounted directories:")
+            for m in mounts:
+                label = "read-only" if m.get("read_only", True) else "read-write"
+                print(f"    {m['host_path']} ({label})")
     else:
         print_warning("Status: stopped")
         print_info("Run 'python scripts/docker.py start' to start")
@@ -539,12 +565,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
-  start    Build image and start container
+  start    Build image and start container (requires setup.py first)
   stop     Stop and remove container
   restart  Restart container (without rebuild)
   update   Rebuild image and restart (use after code changes)
   status   Show container status
   logs     Tail container logs
+
+First-time setup:
+  python scripts/setup.py          # Interactive configuration
+  python scripts/docker.py start   # Build and launch
 
 Examples:
   python scripts/docker.py start     # Initial deployment
