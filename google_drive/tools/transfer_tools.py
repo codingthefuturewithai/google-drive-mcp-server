@@ -169,8 +169,10 @@ async def download_file(file_id: str, local_path: str = "", export_format: str =
     )
 
 
-async def upload_file(local_path: str, folder_id: str = "root", file_name: str = "", ctx: Context = None) -> str:
-    """Upload a local file to Google Drive.
+async def create_file(local_path: str, folder_id: str = "root", file_name: str = "", ctx: Context = None) -> str:
+    """Create a new file on Google Drive by uploading a local file.
+
+    This always creates a new file. To replace the content of an existing file, use update_file instead.
 
     Args:
         local_path: Path to the local file to upload
@@ -179,7 +181,7 @@ async def upload_file(local_path: str, folder_id: str = "root", file_name: str =
         ctx: MCP context
 
     Returns:
-        Confirmation with the uploaded file's Drive ID and link
+        Confirmation with the created file's Drive ID and link
     """
     path = Path(local_path)
 
@@ -211,7 +213,7 @@ async def upload_file(local_path: str, folder_id: str = "root", file_name: str =
     link = result.get("webViewLink", "")
 
     lines = [
-        f"Uploaded '{name}' to Google Drive.",
+        f"Created '{name}' on Google Drive.",
         f"File ID: {drive_id}",
         f"Size: {_format_size(file_size)}",
     ]
@@ -221,4 +223,57 @@ async def upload_file(local_path: str, folder_id: str = "root", file_name: str =
     return "\n".join(lines)
 
 
-transfer_tools = [download_file, upload_file]
+async def update_file(file_id: str, local_path: str, new_name: str = "", ctx: Context = None) -> str:
+    """Replace the content of an existing file on Google Drive.
+
+    Updates the file in place — no duplicate is created. Optionally renames the file.
+
+    Args:
+        file_id: Google Drive file ID of the existing file to update
+        local_path: Path to the local file with new content
+        new_name: Optional new name for the file on Drive
+        ctx: MCP context
+
+    Returns:
+        Confirmation with the updated file's Drive ID and link
+    """
+    path = Path(local_path)
+
+    accessible, msg = _check_path_accessible(local_path, need_write=False)
+    if not accessible:
+        raise PermissionError(msg)
+
+    if not path.exists():
+        raise FileNotFoundError(f"Local file not found: {local_path}")
+    if path.is_dir():
+        raise ValueError(f"Cannot upload a directory: {local_path}. Specify a file path.")
+
+    config = get_config()
+    file_size = path.stat().st_size
+    max_bytes = config.max_upload_size_mb * 1024 * 1024
+
+    if file_size > max_bytes:
+        raise ValueError(
+            f"File size ({_format_size(file_size)}) exceeds the "
+            f"{config.max_upload_size_mb} MB upload limit."
+        )
+
+    drive = get_drive_service()
+    result = await drive.update(file_id, path, new_name=new_name)
+
+    name = result.get("name", path.name)
+    drive_id = result.get("id", "unknown")
+    link = result.get("webViewLink", "")
+
+    lines = [
+        f"Updated '{name}' on Google Drive.",
+        f"File ID: {drive_id}",
+        f"Size: {_format_size(file_size)}",
+    ]
+    if link:
+        lines.append(f"Link: {link}")
+
+    return "\n".join(lines)
+
+
+transfer_tools = [download_file, create_file, update_file]

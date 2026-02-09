@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Python MCP (Model Context Protocol) server for Google Drive using FastMCP with a **decorator pattern** for automatic tool enhancement. Provides 6 tools that let AI assistants search, browse, download, upload, inspect, and organize files on Google Drive. Binary content never enters the MCP protocol — files are transferred to/from the local filesystem.
+Python MCP (Model Context Protocol) server for Google Drive using FastMCP with a **decorator pattern** for automatic tool enhancement. Provides 7 tools that let AI assistants search, browse, download, create, update, inspect, and organize files on Google Drive. Binary content never enters the MCP protocol — files are transferred to/from the local filesystem.
 
 ## Build & Run Commands
 
@@ -57,14 +57,15 @@ Tools are NOT registered with `@mcp.tool()` directly. Instead:
 **Decorator chain order** (applied in `server/app.py:register_tools`):
 - All tools: `exception_handler(tool_logger(type_converter(func)))`
 
-### Google Drive Tools (6 total)
+### Google Drive Tools (7 total)
 
 | Tool | File | Purpose |
 |------|------|---------|
 | `search_files` | `tools/search_tools.py` | Search by name or Drive API query |
 | `list_folder` | `tools/search_tools.py` | List folder contents |
 | `download_file` | `tools/transfer_tools.py` | Download/export files to local filesystem |
-| `upload_file` | `tools/transfer_tools.py` | Upload local files to Drive |
+| `create_file` | `tools/transfer_tools.py` | Create a new file on Drive by uploading a local file |
+| `update_file` | `tools/transfer_tools.py` | Replace content of an existing file on Drive |
 | `get_file_info` | `tools/metadata_tools.py` | Get detailed file metadata |
 | `create_folder` | `tools/folder_tools.py` | Create folders on Drive |
 

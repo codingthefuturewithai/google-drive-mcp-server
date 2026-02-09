@@ -18,7 +18,8 @@ DRIVE_TOOLS = [
     "search_files",
     "list_folder",
     "download_file",
-    "upload_file",
+    "create_file",
+    "update_file",
     "get_file_info",
     "create_folder",
 ]
@@ -28,7 +29,7 @@ class TestDriveToolDiscovery:
     """Test that drive tools are discoverable via MCP."""
 
     async def test_all_drive_tools_discoverable(self, mcp_session):
-        """All 6 drive tools should appear in list_tools()."""
+        """All 7 drive tools should appear in list_tools()."""
         session, transport = mcp_session
         tools_response = await session.list_tools()
         tool_names = [t.name for t in tools_response.tools]
@@ -69,10 +70,17 @@ class TestDriveToolDiscovery:
         assert "file_id" in df.inputSchema.get("properties", {}), "download_file missing 'file_id'"
         assert "file_id" in df.inputSchema.get("required", []), "download_file 'file_id' not required"
 
-        # upload_file must have 'local_path' required
-        uf = tool_map["upload_file"]
-        assert "local_path" in uf.inputSchema.get("properties", {}), "upload_file missing 'local_path'"
-        assert "local_path" in uf.inputSchema.get("required", []), "upload_file 'local_path' not required"
+        # create_file must have 'local_path' required
+        cf2 = tool_map["create_file"]
+        assert "local_path" in cf2.inputSchema.get("properties", {}), "create_file missing 'local_path'"
+        assert "local_path" in cf2.inputSchema.get("required", []), "create_file 'local_path' not required"
+
+        # update_file must have 'file_id' and 'local_path' required
+        uf = tool_map["update_file"]
+        assert "file_id" in uf.inputSchema.get("properties", {}), "update_file missing 'file_id'"
+        assert "file_id" in uf.inputSchema.get("required", []), "update_file 'file_id' not required"
+        assert "local_path" in uf.inputSchema.get("properties", {}), "update_file missing 'local_path'"
+        assert "local_path" in uf.inputSchema.get("required", []), "update_file 'local_path' not required"
 
         # get_file_info must have 'file_id' required
         gfi = tool_map["get_file_info"]
@@ -90,10 +98,10 @@ class TestDriveToolDiscovery:
         assert "folder_id" not in required, "list_folder 'folder_id' should not be required"
 
     async def test_drive_tool_count(self, mcp_session):
-        """Verify we have exactly 6 drive tools registered."""
+        """Verify we have exactly 7 drive tools registered."""
         session, transport = mcp_session
         tools_response = await session.list_tools()
         tool_names = [t.name for t in tools_response.tools]
 
         drive_count = sum(1 for name in tool_names if name in DRIVE_TOOLS)
-        assert drive_count == 6, f"Expected 6 drive tools, found {drive_count} (transport: {transport})"
+        assert drive_count == 7, f"Expected 7 drive tools, found {drive_count} (transport: {transport})"

@@ -350,6 +350,45 @@ class DriveService:
         except HttpError as e:
             _handle_http_error(e)
 
+    async def update(self, file_id: str, local_path: str | Path, new_name: str = "") -> Dict[str, Any]:
+        """Update an existing file's content on Google Drive.
+
+        Args:
+            file_id: The Google Drive file ID to update.
+            local_path: Path to the local file with new content.
+            new_name: Optional new name for the file.
+
+        Returns:
+            Metadata dict of the updated file.
+        """
+        service = self._get_service()
+        local_path = Path(local_path)
+
+        file_metadata = {}
+        if new_name:
+            file_metadata["name"] = new_name
+
+        media = MediaFileUpload(
+            str(local_path),
+            resumable=True,
+            chunksize=UPLOAD_CHUNK_SIZE,
+        )
+
+        try:
+            result = await asyncio.to_thread(
+                service.files()
+                .update(
+                    fileId=file_id,
+                    body=file_metadata if file_metadata else None,
+                    media_body=media,
+                    fields="id, name, mimeType, size, webViewLink",
+                )
+                .execute
+            )
+            return result
+        except HttpError as e:
+            _handle_http_error(e)
+
     async def create_folder(self, name: str, parent_id: str = "root") -> Dict[str, Any]:
         """Create a folder on Google Drive.
 

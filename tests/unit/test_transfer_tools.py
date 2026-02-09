@@ -6,7 +6,8 @@ from unittest.mock import patch, AsyncMock, MagicMock, PropertyMock
 
 from google_drive.tools.transfer_tools import (
     download_file,
-    upload_file,
+    create_file,
+    update_file,
     _resolve_download_path,
     _format_size,
 )
@@ -101,11 +102,11 @@ class TestDownloadFile:
         assert "Downloaded 'My Doc'" in result
 
 
-class TestUploadFile:
-    """Test upload_file tool."""
+class TestCreateFile:
+    """Test create_file tool."""
 
     @pytest.mark.asyncio
-    async def test_upload_confirmation(self, mock_drive, tmp_path):
+    async def test_create_confirmation(self, mock_drive, tmp_path):
         test_file = tmp_path / "upload_me.txt"
         test_file.write_text("hello")
 
@@ -117,34 +118,34 @@ class TestUploadFile:
 
         with patch("google_drive.tools.transfer_tools.get_config") as mock_config:
             mock_config.return_value = MagicMock(max_upload_size_mb=500)
-            result = await upload_file(str(test_file))
+            result = await create_file(str(test_file))
 
-        assert "Uploaded 'upload_me.txt'" in result
+        assert "Created 'upload_me.txt'" in result
         assert "new_id_123" in result
         assert "https://drive.google.com" in result
 
     @pytest.mark.asyncio
-    async def test_upload_missing_file_raises(self, mock_drive):
+    async def test_create_missing_file_raises(self, mock_drive):
         with pytest.raises(FileNotFoundError, match="Local file not found"):
-            await upload_file("/nonexistent/file.txt")
+            await create_file("/nonexistent/file.txt")
 
     @pytest.mark.asyncio
-    async def test_upload_directory_raises(self, mock_drive, tmp_path):
+    async def test_create_directory_raises(self, mock_drive, tmp_path):
         with pytest.raises(ValueError, match="Cannot upload a directory"):
-            await upload_file(str(tmp_path))
+            await create_file(str(tmp_path))
 
     @pytest.mark.asyncio
-    async def test_upload_exceeds_size_limit(self, mock_drive, tmp_path):
+    async def test_create_exceeds_size_limit(self, mock_drive, tmp_path):
         big_file = tmp_path / "big.bin"
         big_file.write_bytes(b"x" * (2 * 1024 * 1024))  # 2 MB
 
         with patch("google_drive.tools.transfer_tools.get_config") as mock_config:
             mock_config.return_value = MagicMock(max_upload_size_mb=1)  # 1 MB limit
             with pytest.raises(ValueError, match="exceeds the .* upload limit"):
-                await upload_file(str(big_file))
+                await create_file(str(big_file))
 
     @pytest.mark.asyncio
-    async def test_upload_custom_name(self, mock_drive, tmp_path):
+    async def test_create_custom_name(self, mock_drive, tmp_path):
         test_file = tmp_path / "local.txt"
         test_file.write_text("data")
 
@@ -154,8 +155,63 @@ class TestUploadFile:
 
         with patch("google_drive.tools.transfer_tools.get_config") as mock_config:
             mock_config.return_value = MagicMock(max_upload_size_mb=500)
-            result = await upload_file(str(test_file), file_name="custom.txt")
+            result = await create_file(str(test_file), file_name="custom.txt")
 
         mock_drive.upload.assert_called_once()
         call_kwargs = mock_drive.upload.call_args
         assert call_kwargs.kwargs["file_name"] == "custom.txt"
+
+
+class TestUpdateFile:
+    """Test update_file tool."""
+
+    @pytest.mark.asyncio
+    async def test_update_confirmation(self, mock_drive, tmp_path):
+        test_file = tmp_path / "updated.txt"
+        test_file.write_text("new content")
+
+        mock_drive.update.return_value = {
+            "id": "existing_id_456",
+            "name": "updated.txt",
+            "webViewLink": "https://drive.google.com/file/existing_id_456/view",
+        }
+
+        with patch("google_drive.tools.transfer_tools.get_config") as mock_config:
+            mock_config.return_value = MagicMock(max_upload_size_mb=500)
+            result = await update_file("existing_id_456", str(test_file))
+
+        assert "Updated 'updated.txt'" in result
+        assert "existing_id_456" in result
+        assert "https://drive.google.com" in result
+
+    @pytest.mark.asyncio
+    async def test_update_with_new_name(self, mock_drive, tmp_path):
+        test_file = tmp_path / "local.txt"
+        test_file.write_text("data")
+
+        mock_drive.update.return_value = {
+            "id": "id1", "name": "renamed.txt", "webViewLink": ""
+        }
+
+        with patch("google_drive.tools.transfer_tools.get_config") as mock_config:
+            mock_config.return_value = MagicMock(max_upload_size_mb=500)
+            result = await update_file("id1", str(test_file), new_name="renamed.txt")
+
+        mock_drive.update.assert_called_once()
+        call_kwargs = mock_drive.update.call_args
+        assert call_kwargs.kwargs["new_name"] == "renamed.txt"
+
+    @pytest.mark.asyncio
+    async def test_update_file_not_found(self, mock_drive):
+        with pytest.raises(FileNotFoundError, match="Local file not found"):
+            await update_file("some_id", "/nonexistent/file.txt")
+
+    @pytest.mark.asyncio
+    async def test_update_file_too_large(self, mock_drive, tmp_path):
+        big_file = tmp_path / "big.bin"
+        big_file.write_bytes(b"x" * (2 * 1024 * 1024))  # 2 MB
+
+        with patch("google_drive.tools.transfer_tools.get_config") as mock_config:
+            mock_config.return_value = MagicMock(max_upload_size_mb=1)  # 1 MB limit
+            with pytest.raises(ValueError, match="exceeds the .* upload limit"):
+                await update_file("some_id", str(big_file))
