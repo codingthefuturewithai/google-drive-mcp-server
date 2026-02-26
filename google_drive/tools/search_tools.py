@@ -35,9 +35,13 @@ async def search_files(query: str, max_results: int = 20, file_type: str = "", c
     (searches by file name) and structured Drive API queries.
 
     Args:
-        query: Search text or Drive API query string
+        query: Search text or Drive API query string. The query parameter searches by
+               file name or content — it cannot be empty. To browse all folders without
+               a specific name to search for, use list_folder instead.
         max_results: Maximum results to return (default 20, max 100)
-        file_type: Filter by type: document, spreadsheet, presentation, folder, pdf, image, video, audio
+        file_type: Filter by type: document, spreadsheet, presentation, folder, pdf, image, video, audio.
+                   Note: file_type alone doesn't return all items of that type — you must also provide
+                   a query to search for.
         ctx: MCP context
 
     Returns:
@@ -61,7 +65,9 @@ async def search_files(query: str, max_results: int = 20, file_type: str = "", c
 async def list_folder(folder_id: str = "root", max_results: int = 50, ctx: Context = None) -> str:
     """List contents of a Google Drive folder.
 
-    Shows immediate children of a folder, with folders listed first.
+    Use this to discover what folders and files exist in a location. Shows immediate
+    children with folders listed first. Call with folder_id='root' to browse the top
+    level of My Drive — this is the recommended way to discover available folders.
 
     Args:
         folder_id: Folder ID to list (default "root" for My Drive root)
