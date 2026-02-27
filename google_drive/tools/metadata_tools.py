@@ -67,6 +67,28 @@ async def get_file_info(file_id: str, ctx: Context = None) -> str:
     if description:
         lines.append(f"Description: {description}")
 
+    # Resolve parent folder path
+    parents = meta.get("parents", [])
+    if parents:
+        path_parts = []
+        current_parent_id = parents[0]  # Files have one parent in My Drive
+        try:
+            while current_parent_id:
+                parent_meta = await drive.get_metadata(current_parent_id)
+                parent_name = parent_meta.get("name", "")
+                # "My Drive" is the root — stop here but include it
+                path_parts.insert(0, parent_name)
+                grandparents = parent_meta.get("parents", [])
+                if not grandparents or parent_name == "My Drive":
+                    break
+                current_parent_id = grandparents[0]
+        except Exception:
+            pass  # If resolution fails, omit the path rather than crashing
+
+        if path_parts:
+            lines.append(f"Folder: {' > '.join(path_parts)}")
+            lines.append(f"Folder ID: {parents[0]}")  # The immediate parent ID for use in create_file
+
     lines.append(f"Starred: {'Yes' if meta.get('starred') else 'No'}")
     lines.append(f"Shared: {'Yes' if meta.get('shared') else 'No'}")
 
