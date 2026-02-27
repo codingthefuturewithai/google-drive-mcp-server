@@ -108,6 +108,65 @@ def _check_path_accessible(file_path: str, need_write: bool = False) -> tuple:
     return False, "\n".join(lines)
 
 
+def _validate_directory_exists(dir_path: Path, is_default_download_dir: bool = False) -> None:
+    """Validate that a directory exists and is accessible.
+
+    Raises FileNotFoundError with a helpful message if the directory doesn't exist.
+
+    Args:
+        dir_path: Directory path to validate
+        is_default_download_dir: If True, includes setup instructions in error message
+    """
+    if not dir_path.exists():
+        lines = [
+            f"Directory does not exist: {dir_path}",
+            "",
+        ]
+
+        if is_default_download_dir:
+            # This is the default download directory from config
+            in_docker = bool(os.environ.get("GOOGLE_DRIVE_DOCKER"))
+
+            if in_docker:
+                lines.extend([
+                    "This is the configured download directory for the Docker container.",
+                    "The directory must exist on the HOST system before the container starts.",
+                    "",
+                    "To fix this:",
+                    f"  1. Create the directory on your host: mkdir -p '{dir_path}'",
+                    "  2. Restart the container: python scripts/docker.py restart",
+                    "",
+                    "Or reconfigure with a different directory:",
+                    "  python scripts/setup.py --force",
+                ])
+            else:
+                lines.extend([
+                    "This is the configured download directory.",
+                    "",
+                    "To fix this, create the directory:",
+                    f"  mkdir -p '{dir_path}'  # macOS/Linux",
+                    f"  New-Item -ItemType Directory -Path '{dir_path}'  # Windows PowerShell",
+                    "",
+                    "The directory will be created automatically on next server restart,",
+                    "or you can create it manually now and retry the operation.",
+                ])
+        else:
+            # This is a user-specified path
+            lines.extend([
+                "To fix this, create the directory first:",
+                f"  mkdir -p '{dir_path}'  # macOS/Linux",
+                f"  New-Item -ItemType Directory -Path '{dir_path}'  # Windows PowerShell",
+            ])
+
+        raise FileNotFoundError("\n".join(lines))
+
+    if not dir_path.is_dir():
+        raise FileNotFoundError(
+            f"Path exists but is not a directory: {dir_path}\n"
+            f"Please specify a directory path, not a file."
+        )
+
+
 def _resolve_download_path(local_path: str, filename: str) -> Path:
     """Resolve the download destination path.
 
@@ -120,16 +179,38 @@ def _resolve_download_path(local_path: str, filename: str) -> Path:
 
     Returns:
         Resolved Path for the download destination.
+
+    Raises:
+        FileNotFoundError: If the target directory doesn't exist (with helpful message)
     """
     if not local_path:
         config = get_config()
-        return config.download_dir / filename
+        download_dir = config.download_dir
+
+        # Validate the default download directory exists
+        _validate_directory_exists(download_dir, is_default_download_dir=True)
+
+        return download_dir / filename
 
     path = Path(local_path)
+
+    # If user specified a directory, validate it exists
     if path.is_dir():
         return path / filename
-    # If it's a file path, ensure parent directory exists
-    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # If it's a file path, validate the parent directory exists
+    parent_dir = path.parent
+    if not parent_dir.exists():
+        # Try to create it, but catch the error and provide helpful message
+        try:
+            parent_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as e:
+            raise FileNotFoundError(
+                f"Cannot create parent directory: {parent_dir}\n"
+                f"Error: {e}\n\n"
+                f"Please create the directory first or choose a different location."
+            ) from e
+
     return path
 
 
@@ -154,14 +235,36 @@ async def download_file(file_id: str, local_path: str = "", export_format: str =
     metadata = await drive.get_metadata(file_id)
     filename = metadata["name"]
 
-    dest = _resolve_download_path(local_path, filename)
+    try:
+        dest = _resolve_download_path(local_path, filename)
 
-    # Validate the download destination is in a writable mount (Docker only)
-    accessible, msg = _check_path_accessible(str(dest), need_write=True)
-    if not accessible:
-        raise PermissionError(msg)
+        # Validate the download destination is in a writable mount (Docker only)
+        accessible, msg = _check_path_accessible(str(dest), need_write=True)
+        if not accessible:
+            raise PermissionError(msg)
 
-    final_path, bytes_written = await drive.download(file_id, dest, export_format=export_format)
+        final_path, bytes_written = await drive.download(file_id, dest, export_format=export_format)
+
+    except PermissionError as e:
+        # If this is already our detailed error message, re-raise as-is
+        error_msg = str(e)
+        if "Mounted directories:" in error_msg or "read-only mount" in error_msg:
+            raise
+
+        # Generate helpful error message with mount information
+        # Use the destination path if it was successfully resolved, otherwise construct it
+        if "dest" in locals():
+            check_path = str(dest)
+        else:
+            # dest wasn't created yet, construct what it would have been
+            check_path = local_path if local_path else str(get_config().download_dir / filename)
+
+        _, helpful_msg = _check_path_accessible(check_path, need_write=True)
+        if helpful_msg:
+            raise PermissionError(helpful_msg) from e
+        else:
+            # Path passed validation but still got PermissionError - re-raise original
+            raise
 
     return (
         f"Downloaded '{filename}' to {final_path}\n"
