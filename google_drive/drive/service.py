@@ -417,6 +417,68 @@ class DriveService:
         except HttpError as e:
             _handle_http_error(e)
 
+    async def delete(self, file_id: str, permanent: bool = False) -> Dict[str, Any]:
+        """Delete or trash a file or folder.
+
+        Args:
+            file_id: File or folder ID to delete.
+            permanent: If True, permanently delete. If False, move to trash (default).
+
+        Returns:
+            Metadata dict if trashed, empty dict if permanently deleted.
+        """
+        service = self._get_service()
+
+        try:
+            if permanent:
+                # Permanently delete - returns no content
+                await asyncio.to_thread(
+                    service.files().delete(fileId=file_id).execute
+                )
+                return {}
+            else:
+                # Move to trash - returns updated metadata
+                result = await asyncio.to_thread(
+                    service.files()
+                    .update(fileId=file_id, body={"trashed": True}, fields=FILE_FIELDS)
+                    .execute
+                )
+                return result
+        except HttpError as e:
+            _handle_http_error(e)
+
+    async def move(self, file_id: str, new_parent_id: str) -> Dict[str, Any]:
+        """Move a file or folder to a different parent folder.
+
+        Args:
+            file_id: File or folder ID to move.
+            new_parent_id: Destination folder ID (use "root" for My Drive root).
+
+        Returns:
+            Updated file metadata.
+        """
+        service = self._get_service()
+
+        try:
+            # Get current parents to remove them
+            file_meta = await self.get_metadata(file_id)
+            current_parents = file_meta.get("parents", [])
+
+            # Move: add new parent, remove old parents
+            result = await asyncio.to_thread(
+                service.files()
+                .update(
+                    fileId=file_id,
+                    addParents=new_parent_id,
+                    removeParents=",".join(current_parents),
+                    fields=FILE_FIELDS,
+                )
+                .execute
+            )
+            return result
+        except HttpError as e:
+            _handle_http_error(e)
+
 
 # Singleton instance
 _drive_service = None
