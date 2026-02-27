@@ -100,10 +100,12 @@ def _check_path_accessible(file_path: str, need_write: bool = False) -> tuple:
 
     if not accessible_dirs:
         lines.append("  (none configured)")
-
-    lines.append("")
-    lines.append("Move the file to one of these directories and try again.")
-    lines.append("Or run 'python scripts/setup.py --force' to add more directories.")
+        lines.append("")
+        lines.append("No writable directories are mounted. User intervention required.")
+        lines.append("Run 'python scripts/setup.py --force' to configure directory mounts.")
+    else:
+        lines.append("")
+        lines.append("Specify a path in one of these mounted directories and retry.")
 
     return False, "\n".join(lines)
 

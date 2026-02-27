@@ -58,14 +58,39 @@ class ServerConfig:
             self.data_dir = Path(platformdirs.user_data_dir("google_drive"))
         if self.log_dir is None:
             self.log_dir = Path(platformdirs.user_log_dir("google_drive"))
+
+        # Download directory: read from Docker env var in container, use platform default locally
         if self.download_dir is None:
-            self.download_dir = Path.home() / "Downloads" / "google_drive"
+            if os.environ.get("GOOGLE_DRIVE_DOCKER"):
+                # Docker mode: read from GOOGLE_DRIVE_MOUNTS env var (no default)
+                import json
+                mounts_json = os.environ.get("GOOGLE_DRIVE_MOUNTS", "")
+                try:
+                    mounts = json.loads(mounts_json) if mounts_json else {}
+                    download_dir_str = mounts.get("download_dir", "")
+                    if download_dir_str:
+                        self.download_dir = Path(download_dir_str)
+                    else:
+                        # No download_dir in mounts config - this is a configuration error
+                        raise ValueError(
+                            "No download directory configured in GOOGLE_DRIVE_MOUNTS. "
+                            "Run 'python scripts/setup.py --force' to configure."
+                        )
+                except (json.JSONDecodeError, TypeError) as e:
+                    raise ValueError(f"Invalid GOOGLE_DRIVE_MOUNTS configuration: {e}")
+            else:
+                # Local mode: use platform-aware default (reliable across Windows/Mac/Linux)
+                self.download_dir = Path.home() / "Downloads" / "google_drive"
 
         # Ensure directories exist
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.download_dir.mkdir(parents=True, exist_ok=True)
+
+        # Only auto-create download_dir in local mode
+        # In Docker, it must exist on the host before container starts
+        if not os.environ.get("GOOGLE_DRIVE_DOCKER"):
+            self.download_dir.mkdir(parents=True, exist_ok=True)
         
         # Set file paths
         self.config_file_path = self.config_dir / "config.yaml"
