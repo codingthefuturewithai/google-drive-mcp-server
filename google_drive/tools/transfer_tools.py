@@ -207,10 +207,17 @@ def _resolve_download_path(local_path: str, filename: str) -> Path:
         try:
             parent_dir.mkdir(parents=True, exist_ok=True)
         except (PermissionError, OSError) as e:
-            raise FileNotFoundError(
-                f"Cannot create parent directory: {parent_dir}\n"
+            # Get helpful mount info (Docker) or empty string (non-Docker)
+            _, helpful_msg = _check_path_accessible(str(path), need_write=True)
+            if helpful_msg:
+                # Docker mode: raise PermissionError (not FileNotFoundError) so download_file's
+                # recovery block also runs, and the agent sees the full list of valid mounted directories
+                raise PermissionError(helpful_msg) from e
+            # Non-Docker mode: any writable path is valid — this is a genuine OS permissions error
+            raise PermissionError(
+                f"Cannot write to: {parent_dir}\n"
                 f"Error: {e}\n\n"
-                f"Please create the directory first or choose a different location."
+                f"Choose a directory where you have write access and retry."
             ) from e
 
     return path
