@@ -78,12 +78,12 @@ def _check_path_accessible(file_path: str, need_write: bool = False) -> tuple:
             if resolved.startswith(host_path + "/") or resolved == host_path:
                 if need_write and read_only:
                     lines = [
-                        f"Path '{file_path}' is in a read-only mount ({host_path}).",
+                        f"Path '{file_path}' is in a read-only mount.",
                         "",
-                        "To write to this directory, reconfigure with a read-write mount:",
-                        "  python scripts/setup.py --force",
+                        "Requirement: The path must be within a read-write mount.",
                         "",
-                        f"Or use the download directory instead: {download_dir}",
+                        "Read-write mount:",
+                        f"  - {download_dir} (read-write)",
                     ]
                     return False, "\n".join(lines)
                 return True, ""
@@ -101,22 +101,10 @@ def _check_path_accessible(file_path: str, need_write: bool = False) -> tuple:
     if not accessible_dirs:
         lines.append("  (none configured)")
         lines.append("")
-        lines.append("No writable directories are mounted. User intervention required.")
-        lines.append("Run 'python scripts/setup.py --force' to configure directory mounts.")
+        lines.append("No directories are mounted. No file operations can succeed until at least one directory is mounted.")
     else:
         lines.append("")
-        lines.append("To upload a file from a sandboxed environment (like Claude Code):")
-        lines.append("")
-        lines.append("Option 1: Use a filesystem MCP tool")
-        lines.append("  1. Write your file to a mounted directory using a filesystem MCP tool")
-        lines.append("     Example: mcp__filesystem__write_file or similar")
-        lines.append(f"  2. Then retry create_file with local_path pointing to the mounted path")
-        lines.append("")
-        lines.append("Option 2: Use bash (if you have direct filesystem access)")
-        lines.append("  1. Copy/move your file to one of the mounted directories above")
-        lines.append("  2. Then retry create_file with the new path")
-        lines.append("")
-        lines.append("Note: Bash commands may fail if you're in a sandbox - use Option 1 instead.")
+        lines.append("Requirement: local_path must exist within one of the mounted directories listed above.")
 
     return False, "\n".join(lines)
 
@@ -137,38 +125,21 @@ def _validate_directory_exists(dir_path: Path, is_default_download_dir: bool = F
         ]
 
         if is_default_download_dir:
-            # This is the default download directory from config
             in_docker = bool(os.environ.get("GOOGLE_DRIVE_DOCKER"))
-
             if in_docker:
                 lines.extend([
                     "This is the configured download directory for the Docker container.",
-                    "The directory must exist on the HOST system before the container starts.",
-                    "",
-                    "To fix this:",
-                    f"  1. Create the directory on your host: mkdir -p '{dir_path}'",
-                    "  2. Restart the container: python scripts/docker.py restart",
-                    "",
-                    "Or reconfigure with a different directory:",
-                    "  python scripts/setup.py --force",
+                    "The directory must exist on the host system before the container can write to it.",
+                    "Create the directory on the host and restart the container.",
                 ])
             else:
                 lines.extend([
                     "This is the configured download directory.",
-                    "",
-                    "To fix this, create the directory:",
-                    f"  mkdir -p '{dir_path}'  # macOS/Linux",
-                    f"  New-Item -ItemType Directory -Path '{dir_path}'  # Windows PowerShell",
-                    "",
-                    "The directory will be created automatically on next server restart,",
-                    "or you can create it manually now and retry the operation.",
+                    "The directory must exist before files can be downloaded.",
                 ])
         else:
-            # This is a user-specified path
             lines.extend([
-                "To fix this, create the directory first:",
-                f"  mkdir -p '{dir_path}'  # macOS/Linux",
-                f"  New-Item -ItemType Directory -Path '{dir_path}'  # Windows PowerShell",
+                "The specified path must be an existing directory.",
             ])
 
         raise FileNotFoundError("\n".join(lines))
@@ -297,13 +268,10 @@ async def create_file(local_path: str, folder_id: str = "root", file_name: str =
 
     This always creates a new file. To replace the content of an existing file, use update_file instead.
 
-    IMPORTANT: In Docker mode, local_path must be within a mounted directory. In sandboxed
-    environments (like Claude Code), you cannot use bash to move files to mounted directories.
-    Instead, use a filesystem MCP tool to write your file to a mounted path first, then call
-    this tool with that path.
+    In Docker mode, local_path must be within a directory mounted into the server container.
 
     Args:
-        local_path: Path to the local file to upload (must be in a mounted directory in Docker mode)
+        local_path: Path to the local file to upload. In Docker mode, must be within a mounted directory.
         folder_id: Destination folder ID on Drive (default "root" for My Drive root)
         file_name: Override name for the uploaded file (default uses local filename)
         ctx: MCP context
@@ -356,14 +324,11 @@ async def update_file(file_id: str, local_path: str, new_name: str = "", ctx: Co
 
     Updates the file in place — no duplicate is created. Optionally renames the file.
 
-    IMPORTANT: In Docker mode, local_path must be within a mounted directory. In sandboxed
-    environments (like Claude Code), you cannot use bash to move files to mounted directories.
-    Instead, use a filesystem MCP tool to write your file to a mounted path first, then call
-    this tool with that path.
+    In Docker mode, local_path must be within a directory mounted into the server container.
 
     Args:
         file_id: Google Drive file ID of the existing file to update
-        local_path: Path to the local file with new content (must be in a mounted directory in Docker mode)
+        local_path: Path to the local file with new content. In Docker mode, must be within a mounted directory.
         new_name: Optional new name for the file on Drive
         ctx: MCP context
 

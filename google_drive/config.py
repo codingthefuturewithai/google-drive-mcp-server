@@ -71,13 +71,12 @@ class ServerConfig:
                     if download_dir_str:
                         self.download_dir = Path(download_dir_str)
                     else:
-                        # No download_dir in mounts config - this is a configuration error
                         raise ValueError(
-                            "No download directory configured in GOOGLE_DRIVE_MOUNTS. "
-                            "Run 'python scripts/setup.py --force' to configure."
+                            "No download directory is configured. "
+                            "Set the download_dir field in the GOOGLE_DRIVE_MOUNTS environment variable."
                         )
                 except (json.JSONDecodeError, TypeError) as e:
-                    raise ValueError(f"Invalid GOOGLE_DRIVE_MOUNTS configuration: {e}")
+                    raise ValueError(f"Invalid GOOGLE_DRIVE_MOUNTS environment variable: {e}")
             else:
                 # Local mode: use platform-aware default (reliable across Windows/Mac/Linux)
                 self.download_dir = Path.home() / "Downloads" / "google_drive"

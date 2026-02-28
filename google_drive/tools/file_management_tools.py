@@ -83,8 +83,7 @@ async def move_file(file_id: str, new_parent_folder_id: str, ctx: Context = None
     except FileNotFoundError:
         raise FileNotFoundError(
             f"File not found: {file_id}\n\n"
-            f"The file may have been deleted or you may not have access to it.\n"
-            f"Use search_files or list_folder to find valid file IDs."
+            f"The file may have been deleted or you may not have access to it."
         )
 
     file_name = file_meta.get("name", "Unknown")
@@ -111,14 +110,13 @@ async def move_file(file_id: str, new_parent_folder_id: str, ctx: Context = None
                     f"Destination is not a folder: {new_parent_folder_id}\n"
                     f"Name: {folder_name}\n"
                     f"Type: {folder_mime}\n\n"
-                    f"Use list_folder or search_files with file_type='folder' to find folder IDs."
+                    f"Requirement: new_parent_folder_id must be a folder ID, not a file ID."
                 )
 
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"Destination folder not found: {new_parent_folder_id}\n\n"
-                f"The folder may have been deleted or you may not have access to it.\n"
-                f"Use list_folder or search_files with file_type='folder' to find valid folder IDs."
+                f"The folder may have been deleted or you may not have access to it."
             )
 
     # Get destination folder name for confirmation message
