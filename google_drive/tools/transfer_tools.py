@@ -105,7 +105,18 @@ def _check_path_accessible(file_path: str, need_write: bool = False) -> tuple:
         lines.append("Run 'python scripts/setup.py --force' to configure directory mounts.")
     else:
         lines.append("")
-        lines.append("Specify a path in one of these mounted directories and retry.")
+        lines.append("To upload a file from a sandboxed environment (like Claude Code):")
+        lines.append("")
+        lines.append("Option 1: Use a filesystem MCP tool")
+        lines.append("  1. Write your file to a mounted directory using a filesystem MCP tool")
+        lines.append("     Example: mcp__filesystem__write_file or similar")
+        lines.append(f"  2. Then retry create_file with local_path pointing to the mounted path")
+        lines.append("")
+        lines.append("Option 2: Use bash (if you have direct filesystem access)")
+        lines.append("  1. Copy/move your file to one of the mounted directories above")
+        lines.append("  2. Then retry create_file with the new path")
+        lines.append("")
+        lines.append("Note: Bash commands may fail if you're in a sandbox - use Option 1 instead.")
 
     return False, "\n".join(lines)
 
@@ -286,8 +297,13 @@ async def create_file(local_path: str, folder_id: str = "root", file_name: str =
 
     This always creates a new file. To replace the content of an existing file, use update_file instead.
 
+    IMPORTANT: In Docker mode, local_path must be within a mounted directory. In sandboxed
+    environments (like Claude Code), you cannot use bash to move files to mounted directories.
+    Instead, use a filesystem MCP tool to write your file to a mounted path first, then call
+    this tool with that path.
+
     Args:
-        local_path: Path to the local file to upload
+        local_path: Path to the local file to upload (must be in a mounted directory in Docker mode)
         folder_id: Destination folder ID on Drive (default "root" for My Drive root)
         file_name: Override name for the uploaded file (default uses local filename)
         ctx: MCP context
@@ -340,9 +356,14 @@ async def update_file(file_id: str, local_path: str, new_name: str = "", ctx: Co
 
     Updates the file in place — no duplicate is created. Optionally renames the file.
 
+    IMPORTANT: In Docker mode, local_path must be within a mounted directory. In sandboxed
+    environments (like Claude Code), you cannot use bash to move files to mounted directories.
+    Instead, use a filesystem MCP tool to write your file to a mounted path first, then call
+    this tool with that path.
+
     Args:
         file_id: Google Drive file ID of the existing file to update
-        local_path: Path to the local file with new content
+        local_path: Path to the local file with new content (must be in a mounted directory in Docker mode)
         new_name: Optional new name for the file on Drive
         ctx: MCP context
 
