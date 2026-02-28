@@ -85,7 +85,7 @@ def _handle_http_error(error: HttpError) -> None:
     reason = error._get_reason() if hasattr(error, '_get_reason') else str(error)
 
     if status == 404:
-        raise FileNotFoundError(f"File not found on Google Drive: {reason}")
+        raise FileNotFoundError(reason)
     elif status == 403:
         raise PermissionError(f"Access denied: {reason}")
     else:
