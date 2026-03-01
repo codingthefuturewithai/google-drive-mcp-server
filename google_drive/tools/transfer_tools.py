@@ -270,9 +270,15 @@ async def create_file(local_path: str, folder_id: str = "root", file_name: str =
 
     In Docker mode, local_path must be within a directory mounted into the server container.
 
+    Before calling this tool, ask the user where to save the file. Use list_folder to show
+    available top-level folders, then confirm the destination before uploading. Only use
+    folder_id="root" if the user explicitly says to save it to My Drive root.
+
     Args:
         local_path: Path to the local file to upload. In Docker mode, must be within a mounted directory.
-        folder_id: Destination folder ID on Drive (default "root" for My Drive root)
+        folder_id: Destination folder ID on Drive. Ask the user where to save the file
+            and use list_folder to discover available folders before calling. Use "root"
+            only if the user explicitly confirms they want the file in My Drive root.
         file_name: Override name for the uploaded file (default uses local filename)
         ctx: MCP context
 

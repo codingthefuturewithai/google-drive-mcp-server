@@ -11,9 +11,15 @@ from google_drive.drive import get_drive_service
 async def create_folder(folder_name: str, parent_folder_id: str = "root", ctx: Context = None) -> str:
     """Create a new folder on Google Drive.
 
+    Before calling this tool, ask the user where to create the folder. Use list_folder to
+    show available locations, then confirm the destination. Only use parent_folder_id="root"
+    if the user explicitly says to create it in My Drive root.
+
     Args:
         folder_name: Name for the new folder
-        parent_folder_id: Parent folder ID (default "root" for My Drive root)
+        parent_folder_id: Parent folder ID. Ask the user where to create the folder
+            and use list_folder to discover available locations before calling. Use "root"
+            only if the user explicitly confirms they want it in My Drive root.
         ctx: MCP context
 
     Returns:
