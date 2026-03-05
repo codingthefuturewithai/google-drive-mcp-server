@@ -21,29 +21,23 @@ There are two ways to run the server: **direct install** or **Docker container**
 
 ### 1. Get your Google credentials
 
+Before running any setup commands, download your OAuth credentials from Google Cloud Console:
+
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project (or select an existing one)
 3. Enable the **Google Drive API**
 4. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
 5. Choose **Desktop app**, then download the JSON file
-6. Rename it to `client_secret.json`
 
-### 2. Place credentials and run OAuth flow
+Keep that downloaded file somewhere you can find it — the setup script will ask for its location and copy it into the right place automatically.
+
+### 2. Clone the repo and install dependencies
 
 ```bash
-# Clone the repo
 git clone https://github.com/codingthefuturewithai/google-drive-mcp-server.git
 cd google_drive
 uv sync
-
-# Place your credentials in the platform config directory
-cp /path/to/client_secret.json "$(python -c "import platformdirs; print(platformdirs.user_config_dir('google_drive'))")/client_secret.json"
-
-# Run OAuth flow (opens browser for Google sign-in)
-uv run python -c "from google_drive.auth import get_credentials; import platformdirs; get_credentials(platformdirs.user_config_dir('google_drive'))"
 ```
-
-This generates a `token.json` in the same directory. Both files are needed whether you run directly or via Docker.
 
 ### 3a. Option A — Run directly (STDIO)
 
