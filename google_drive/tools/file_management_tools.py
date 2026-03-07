@@ -8,7 +8,7 @@ from mcp.server.fastmcp import Context
 from google_drive.drive import get_drive_service
 
 
-async def delete_file(file_id: str, permanent: bool = False, ctx: Context = None) -> str:
+async def delete_file(file_id: str, permanent: bool = False, account_email: str = "", ctx: Context = None) -> str:
     """Delete a file or folder from Google Drive.
 
     By default, moves the file to trash (recoverable). Set permanent=True to
@@ -19,12 +19,13 @@ async def delete_file(file_id: str, permanent: bool = False, ctx: Context = None
     Args:
         file_id: Google Drive file ID to delete
         permanent: If True, permanently delete. If False, move to trash (default)
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
         Confirmation message with file name and deletion type
     """
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
 
     # Get file info first to provide helpful confirmation message
     try:
@@ -60,7 +61,7 @@ async def delete_file(file_id: str, permanent: bool = False, ctx: Context = None
         )
 
 
-async def move_file(file_id: str, new_parent_folder_id: str, ctx: Context = None) -> str:
+async def move_file(file_id: str, new_parent_folder_id: str, account_email: str = "", ctx: Context = None) -> str:
     """Move a file or folder to a different parent folder.
 
     Changes the parent folder while preserving all file metadata, sharing settings,
@@ -70,12 +71,13 @@ async def move_file(file_id: str, new_parent_folder_id: str, ctx: Context = None
     Args:
         file_id: Google Drive file ID to move
         new_parent_folder_id: Destination folder ID (use "root" for My Drive root)
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
         Confirmation with file name, old location, and new location
     """
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
 
     # Validate file exists and get current location
     try:

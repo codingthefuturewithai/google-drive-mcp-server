@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Tuple
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
-from google_drive.auth import build_drive_service
+from google_drive.auth import build_drive_service, get_default_account
 from google_drive.config import get_config
 
 # Maps user-friendly type names to MIME type queries
@@ -95,16 +95,23 @@ def _handle_http_error(error: HttpError) -> None:
 class DriveService:
     """Async wrapper around the Google Drive API v3 service."""
 
-    def __init__(self):
+    def __init__(self, account_email: str = ""):
         self._service = None
+        self._account_email = account_email
 
     def _get_service(self):
-        """Lazily initialize the Drive API service."""
+        """Lazily initialize the Drive API service.
+
+        Passes allow_interactive=False so the server never attempts to open
+        a browser. Missing tokens produce a clear PermissionError instead.
+        """
         if self._service is None:
             config = get_config()
             self._service = build_drive_service(
                 config.config_dir,
                 config.google_client_secret_path,
+                self._account_email,
+                allow_interactive=False,
             )
         return self._service
 
@@ -480,13 +487,23 @@ class DriveService:
             _handle_http_error(e)
 
 
-# Singleton instance
-_drive_service = None
+# Service cache: one DriveService instance per account email
+_services: Dict[str, DriveService] = {}
 
 
-def get_drive_service() -> DriveService:
-    """Get the global DriveService singleton."""
-    global _drive_service
-    if _drive_service is None:
-        _drive_service = DriveService()
-    return _drive_service
+def get_drive_service(email: str = "") -> DriveService:
+    """Get the DriveService for the given account email.
+
+    If email is empty, the default account is read from disk on every call
+    so that switch_account takes effect immediately without any restart.
+
+    Falls back to the legacy token.json when no default is configured
+    (preserves backward compatibility for single-account setups).
+    """
+    if not email:
+        config = get_config()
+        email = get_default_account(config.config_dir)
+    # email may still be "" — DriveService("") uses legacy token.json via get_credentials
+    if email not in _services:
+        _services[email] = DriveService(email)
+    return _services[email]

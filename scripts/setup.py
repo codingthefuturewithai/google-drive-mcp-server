@@ -29,7 +29,6 @@ IMAGE_NAME = "google-drive-mcp"
 BASE_PORT = 19001
 CONFIG_DIR = Path(platformdirs.user_config_dir("google_drive"))
 STATE_FILE = CONFIG_DIR / "docker.json"
-REQUIRED_CREDS = ["client_secret.json", "token.json"]
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -165,6 +164,8 @@ def check_docker_running() -> bool:
 def find_client_secret_candidates() -> list:
     """Search common download locations for client_secret JSON files."""
     search_dirs = [
+        CONFIG_DIR,                      # Pre-created config dir — shown to user as save target
+        PROJECT_ROOT,                    # Repo root — common for developers
         Path.home() / "Downloads",
         Path.home() / "Desktop",
         Path.home() / "Documents",
@@ -241,41 +242,47 @@ def copy_client_secret() -> bool:
         return False
 
 
-def run_oauth_flow() -> bool:
-    """Run the Google OAuth browser flow to generate token.json."""
-    print_info("Your browser will open for a one-time Google sign-in.")
-    print_info("Sign in with the Google account whose Drive you want to access.")
-    print_info("After you click Allow, come back here — setup will continue automatically.")
-    print()
-
-    result = subprocess.run(
-        [
-            "uv", "run", "python", "-c",
-            "from google_drive.auth import get_credentials; "
-            "import platformdirs; "
-            "get_credentials(platformdirs.user_config_dir('google_drive'))"
-        ],
-        cwd=str(PROJECT_ROOT),
-    )
-
-    if result.returncode == 0 and (CONFIG_DIR / "token.json").exists():
-        print_success("Google authentication complete")
+def has_authenticated_accounts() -> bool:
+    """Return True if at least one account token exists (legacy or per-account)."""
+    tokens_dir = CONFIG_DIR / "tokens"
+    if tokens_dir.is_dir() and any(tokens_dir.glob("*.json")):
         return True
-    else:
-        print_error("Authentication did not complete. Please try setup again.")
-        return False
+    return (CONFIG_DIR / "token.json").exists()
 
 
-def check_oauth_credentials() -> bool:
-    """Ensure both client_secret.json and token.json exist, acquiring them if needed."""
+def run_add_account(email: str = "") -> str:
+    """Run scripts/add_account.py and return the authenticated email, or '' on failure."""
+    cmd = ["uv", "run", "python", "scripts/add_account.py"]
+    if email:
+        cmd += ["--email", email]
+
+    result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+
+    if result.returncode != 0:
+        return ""
+
+    # add_account.py prints "ACCOUNT:<email>" on success — but we ran without capture,
+    # so output already went to the terminal. Just check if any tokens were saved.
+    tokens_dir = CONFIG_DIR / "tokens"
+    if tokens_dir.is_dir():
+        saved = sorted(tokens_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
+        if saved:
+            return saved[-1].stem  # stem is the email
+    if (CONFIG_DIR / "token.json").exists():
+        return "(legacy token)"
+    return ""
+
+
+def setup_google_accounts() -> bool:
+    """Ensure at least one Google account is authenticated, then offer to add more."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── client_secret.json ────────────────────────────────────────────────────
     if not (CONFIG_DIR / "client_secret.json").exists():
         print_warning("Google client credentials not found.")
         print()
-        print_info("Before continuing, make sure you have downloaded your OAuth client")
-        print_info("credentials from the Google Cloud Console:")
+        print_info("Before continuing, download your OAuth client credentials")
+        print_info("from the Google Cloud Console:")
         print()
         print("    1. Go to https://console.cloud.google.com/")
         print("    2. Select your project (or create one)")
@@ -293,13 +300,38 @@ def check_oauth_credentials() -> bool:
     else:
         print_success("client_secret.json found")
 
-    # ── token.json ────────────────────────────────────────────────────────────
-    if not (CONFIG_DIR / "token.json").exists():
+    # ── First account ─────────────────────────────────────────────────────────
+    if not has_authenticated_accounts():
         print()
-        if not run_oauth_flow():
+        print_info("Next, sign in with your first Google account.")
+        print_info("A browser will open — sign in and click Allow.")
+        print()
+        email = run_add_account()
+        if not email:
+            print_error("Authentication did not complete. Run setup again.")
             return False
+        print_success(f"Authenticated: {email}")
     else:
-        print_success("Google authentication token found")
+        # Show which accounts are already set up
+        tokens_dir = CONFIG_DIR / "tokens"
+        existing = sorted(p.stem for p in tokens_dir.glob("*.json")) if tokens_dir.is_dir() else []
+        if existing:
+            print_success(f"Google accounts already authenticated: {', '.join(existing)}")
+        else:
+            print_success("Google authentication token found (legacy)")
+
+    # ── Additional accounts ───────────────────────────────────────────────────
+    print()
+    print_info("You can connect multiple Google accounts so the server can access all of them.")
+    while True:
+        if not prompt_yes_no("Add another Google account now?", default=False):
+            break
+        email_hint = input("  Email address to sign in with (shown as a reminder before the browser opens, press Enter to skip): ").strip()
+        email = run_add_account(email_hint)
+        if email:
+            print_success(f"Authenticated: {email}")
+        else:
+            print_warning("Authentication did not complete.")
 
     return True
 
@@ -417,23 +449,50 @@ def build_volume_args(config: dict) -> list:
 
 
 def copy_credentials_to_volume() -> bool:
+    """Copy OAuth credentials from host config dir into the Docker volume.
+
+    Copies client_secret.json, all per-account token files from tokens/,
+    the default_account marker, and the legacy token.json if present.
+    """
     print_info("Copying credentials into container volume...")
-    for cred_file in REQUIRED_CREDS:
-        host_path = CONFIG_DIR / cred_file
-        if not host_path.exists():
-            print_error(f"Credential file not found: {host_path}")
-            return False
-        code, _, stderr = run_command([
-            "docker", "run", "--rm",
-            "-v", "google_drive_config:/dest",
-            "-v", f"{host_path}:/src/{cred_file}:ro",
-            "python:3.12-slim",
-            "bash", "-c",
-            f"cp /src/{cred_file} /dest/{cred_file} && chown 1000:1000 /dest/{cred_file}"
-        ])
-        if code != 0:
-            print_error(f"Failed to copy {cred_file}: {stderr}")
-            return False
+
+    if not (CONFIG_DIR / "client_secret.json").exists():
+        print_error(f"client_secret.json not found: {CONFIG_DIR / 'client_secret.json'}")
+        return False
+
+    if not has_authenticated_accounts():
+        print_error("No authentication tokens found. Run setup first.")
+        return False
+
+    # One container invocation copies everything
+    script = (
+        "chown 1000:1000 /dest && "
+        "cp /src/client_secret.json /dest/client_secret.json && "
+        "chown 1000:1000 /dest/client_secret.json && "
+        "{ [ -f /src/token.json ] && "
+        "  cp /src/token.json /dest/token.json && "
+        "  chown 1000:1000 /dest/token.json || true; } && "
+        "{ [ -d /src/tokens ] && "
+        "  mkdir -p /dest/tokens && chown 1000:1000 /dest/tokens && "
+        "  cp /src/tokens/*.json /dest/tokens/ 2>/dev/null && "
+        "  chown 1000:1000 /dest/tokens/*.json 2>/dev/null || true; } && "
+        "{ [ -f /src/default_account ] && "
+        "  cp /src/default_account /dest/default_account && "
+        "  chown 1000:1000 /dest/default_account || true; }"
+    )
+
+    code, _, stderr = run_command([
+        "docker", "run", "--rm",
+        "-v", "google_drive_config:/dest",
+        "-v", f"{CONFIG_DIR}:/src:ro",
+        "python:3.12-slim",
+        "bash", "-c", script,
+    ])
+
+    if code != 0:
+        print_error(f"Failed to copy credentials: {stderr}")
+        return False
+
     print_success("Credentials copied")
     return True
 
@@ -515,6 +574,13 @@ def main():
 
     print_header("Google Drive MCP — Setup")
 
+    # Pre-create the config directory so the user has a real, existing path
+    # to save their downloaded client_secret.json to.
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"  Credentials folder: {Colors.CYAN}{CONFIG_DIR}{Colors.RESET}")
+    print(f"  Save your downloaded client_secret JSON file there.")
+    print()
+
     existing = load_state()
     has_config = "mounts" in existing and "download_dir" in existing
 
@@ -535,7 +601,7 @@ def main():
 
     # Step 2: Google credentials
     print_header("Step 2: Google Credentials")
-    if not check_oauth_credentials():
+    if not setup_google_accounts():
         sys.exit(1)
 
     # Step 3: Port

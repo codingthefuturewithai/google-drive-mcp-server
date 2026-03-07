@@ -18,20 +18,23 @@ def _format_size(num_bytes: int) -> str:
     return f"{num_bytes:.1f} PB"
 
 
-async def get_file_info(file_id: str, ctx: Context = None) -> str:
+async def get_file_info(file_id: str, account_email: str = "", ctx: Context = None) -> str:
     """Get detailed information about a file on Google Drive.
 
     Returns comprehensive metadata including name, type, size, dates,
-    owner, sharing status, and link.
+    owner, sharing status, and link. For Google Workspace files (Docs, Sheets,
+    Slides), also returns the available export formats — call this before
+    download_file when you are unsure which export format to use.
 
     Args:
         file_id: Google Drive file ID
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
-        Formatted file metadata
+        Formatted file metadata including export formats for Google Workspace files
     """
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
     meta = await drive.get_metadata(file_id)
 
     name = meta.get("name", "Unknown")

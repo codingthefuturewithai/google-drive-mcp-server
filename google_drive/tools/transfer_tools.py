@@ -205,22 +205,30 @@ def _resolve_download_path(local_path: str, filename: str) -> Path:
     return path
 
 
-async def download_file(file_id: str, local_path: str = "", export_format: str = "", ctx: Context = None) -> str:
+async def download_file(file_id: str, local_path: str = "", export_format: str = "", account_email: str = "", ctx: Context = None) -> str:
     """Download a file from Google Drive to the local filesystem.
 
     For Google Workspace files (Docs, Sheets, Slides), exports to the specified
     format. For regular files, downloads the binary content directly.
 
+    If you are unsure whether a file is a Google Workspace type or which export
+    formats it supports, call get_file_info first — it lists available formats.
+
     Args:
         file_id: Google Drive file ID to download
         local_path: Local destination path (file or directory). If empty, uses default download directory
-        export_format: Export format for Google Workspace files (pdf, docx, xlsx, csv, pptx, txt, html)
+        export_format: Export format for Google Workspace files. Must match the file type:
+                       - Google Docs:   pdf, docx, txt, html
+                       - Google Sheets: pdf, xlsx, csv
+                       - Google Slides: pdf, pptx
+                       Leave empty to use the default format for each type (docx, xlsx, pptx).
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
         Confirmation with the local file path and size
     """
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
 
     # Get metadata to determine filename and type
     metadata = await drive.get_metadata(file_id)
@@ -263,7 +271,7 @@ async def download_file(file_id: str, local_path: str = "", export_format: str =
     )
 
 
-async def create_file(local_path: str, folder_id: str = "root", file_name: str = "", ctx: Context = None) -> str:
+async def create_file(local_path: str, folder_id: str = "root", file_name: str = "", account_email: str = "", ctx: Context = None) -> str:
     """Create a new file on Google Drive by uploading a local file.
 
     This always creates a new file. To replace the content of an existing file, use update_file instead.
@@ -280,6 +288,7 @@ async def create_file(local_path: str, folder_id: str = "root", file_name: str =
             and use list_folder to discover available folders before calling. Use "root"
             only if the user explicitly confirms they want the file in My Drive root.
         file_name: Override name for the uploaded file (default uses local filename)
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
@@ -307,7 +316,7 @@ async def create_file(local_path: str, folder_id: str = "root", file_name: str =
             f"{config.max_upload_size_mb} MB upload limit."
         )
 
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
     result = await drive.upload(path, folder_id=folder_id, file_name=file_name)
 
     name = result.get("name", path.name)
@@ -325,7 +334,7 @@ async def create_file(local_path: str, folder_id: str = "root", file_name: str =
     return "\n".join(lines)
 
 
-async def update_file(file_id: str, local_path: str, new_name: str = "", ctx: Context = None) -> str:
+async def update_file(file_id: str, local_path: str, new_name: str = "", account_email: str = "", ctx: Context = None) -> str:
     """Replace the content of an existing file on Google Drive.
 
     Updates the file in place — no duplicate is created. Optionally renames the file.
@@ -336,6 +345,7 @@ async def update_file(file_id: str, local_path: str, new_name: str = "", ctx: Co
         file_id: Google Drive file ID of the existing file to update
         local_path: Path to the local file with new content. In Docker mode, must be within a mounted directory.
         new_name: Optional new name for the file on Drive
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
@@ -362,7 +372,7 @@ async def update_file(file_id: str, local_path: str, new_name: str = "", ctx: Co
             f"{config.max_upload_size_mb} MB upload limit."
         )
 
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
     result = await drive.update(file_id, path, new_name=new_name)
 
     name = result.get("name", path.name)

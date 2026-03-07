@@ -46,8 +46,8 @@ IMAGE_NAME = "google-drive-mcp"
 CONFIG_DIR = Path(platformdirs.user_config_dir("google_drive"))
 STATE_FILE = CONFIG_DIR / "docker.json"
 
-# OAuth credential files that must exist before the container can work
-REQUIRED_CREDS = ["client_secret.json", "token.json"]
+# Credential files required in the config directory before the container can work
+REQUIRED_CREDS = ["client_secret.json"]
 
 
 def print_header(text: str):
@@ -259,30 +259,53 @@ def check_docker_running() -> bool:
 def copy_credentials_to_volume() -> bool:
     """Copy OAuth credentials from host config dir into the Docker volume.
 
-    Docker named volumes are not directly writable from the host, so we use
-    a temporary container to copy the files in.
+    Copies client_secret.json, all per-account token files from tokens/,
+    the default_account marker, and the legacy token.json if present.
+    Docker named volumes are not directly writable from the host, so we
+    use a temporary container with the config dir bind-mounted read-only.
     """
     print_info("Copying OAuth credentials into Docker volume...")
 
-    for cred_file in REQUIRED_CREDS:
-        host_path = CONFIG_DIR / cred_file
-        if not host_path.exists():
-            print_error(f"Credential file not found: {host_path}")
-            return False
+    if not (CONFIG_DIR / "client_secret.json").exists():
+        print_error(f"client_secret.json not found: {CONFIG_DIR / 'client_secret.json'}")
+        return False
 
-        # Use a temporary container to copy into the named volume
-        code, _, stderr = run_command([
-            "docker", "run", "--rm",
-            "-v", f"google_drive_config:/dest",
-            "-v", f"{host_path}:/src/{cred_file}:ro",
-            "python:3.12-slim",
-            "bash", "-c",
-            f"cp /src/{cred_file} /dest/{cred_file} && chown 1000:1000 /dest/{cred_file}"
-        ])
+    tokens_dir = CONFIG_DIR / "tokens"
+    has_tokens = tokens_dir.is_dir() and any(tokens_dir.glob("*.json"))
+    has_legacy = (CONFIG_DIR / "token.json").exists()
 
-        if code != 0:
-            print_error(f"Failed to copy {cred_file}: {stderr}")
-            return False
+    if not has_tokens and not has_legacy:
+        print_error("No authentication tokens found. Run setup first.")
+        return False
+
+    # One container invocation copies everything
+    script = (
+        "chown 1000:1000 /dest && "
+        "cp /src/client_secret.json /dest/client_secret.json && "
+        "chown 1000:1000 /dest/client_secret.json && "
+        "{ [ -f /src/token.json ] && "
+        "  cp /src/token.json /dest/token.json && "
+        "  chown 1000:1000 /dest/token.json || true; } && "
+        "{ [ -d /src/tokens ] && "
+        "  mkdir -p /dest/tokens && chown 1000:1000 /dest/tokens && "
+        "  cp /src/tokens/*.json /dest/tokens/ 2>/dev/null && "
+        "  chown 1000:1000 /dest/tokens/*.json 2>/dev/null || true; } && "
+        "{ [ -f /src/default_account ] && "
+        "  cp /src/default_account /dest/default_account && "
+        "  chown 1000:1000 /dest/default_account || true; }"
+    )
+
+    code, _, stderr = run_command([
+        "docker", "run", "--rm",
+        "-v", "google_drive_config:/dest",
+        "-v", f"{CONFIG_DIR}:/src:ro",
+        "python:3.12-slim",
+        "bash", "-c", script,
+    ])
+
+    if code != 0:
+        print_error(f"Failed to copy credentials: {stderr}")
+        return False
 
     print_success("Credentials copied to container volume")
     return True
@@ -558,6 +581,60 @@ def cmd_logs():
     subprocess.run(["docker", "logs", "-f", CONTAINER_NAME])
 
 
+def cmd_teardown():
+    """Remove container, volumes, image, and all config — preserves client_secret.json"""
+    import shutil
+    import tempfile
+
+    print(f"\n{Colors.BOLD}{Colors.RED}Google Drive MCP - Teardown{Colors.RESET}")
+    print("Removes the container, Docker volumes, image, and all saved config.\n")
+
+    # Stop and remove container
+    exists, running, _ = get_container_status()
+    if running:
+        print_info("Stopping container...")
+        run_command(["docker", "stop", CONTAINER_NAME])
+    if exists:
+        run_command(["docker", "rm", CONTAINER_NAME])
+        print_success("Container removed")
+
+    # Remove volumes
+    for vol in ["google_drive_config", "google_drive_data", "google_drive_logs"]:
+        code, _, _ = run_command(["docker", "volume", "rm", vol])
+        if code == 0:
+            print_success(f"Volume removed: {vol}")
+
+    # Remove image
+    code, _, _ = run_command(["docker", "rmi", IMAGE_NAME])
+    if code == 0:
+        print_success(f"Image removed: {IMAGE_NAME}")
+
+    # Wipe config dir, preserve client_secret.json
+    if CONFIG_DIR.exists():
+        secret = CONFIG_DIR / "client_secret.json"
+        backup = None
+        if secret.exists():
+            fd, backup_path = tempfile.mkstemp(suffix=".json")
+            import os as _os
+            _os.close(fd)
+            backup = Path(backup_path)
+            shutil.copy2(secret, backup)
+
+        shutil.rmtree(CONFIG_DIR)
+        CONFIG_DIR.mkdir(parents=True)
+
+        if backup and backup.exists():
+            shutil.move(str(backup), str(secret))
+            print_success(f"Preserved: {secret}")
+
+        print_success(f"Config directory cleared")
+
+    print()
+    print_info("Teardown complete. To set up again:")
+    print(f"  {Colors.CYAN}python scripts/setup.py{Colors.RESET}")
+    print()
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -584,7 +661,7 @@ Examples:
     )
     parser.add_argument(
         "command",
-        choices=["start", "stop", "restart", "update", "status", "logs"],
+        choices=["start", "stop", "restart", "update", "status", "logs", "teardown"],
         help="Command to run"
     )
 
@@ -597,6 +674,7 @@ Examples:
         "update": cmd_update,
         "status": cmd_status,
         "logs": cmd_logs,
+        "teardown": cmd_teardown,
     }
 
     try:

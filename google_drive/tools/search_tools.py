@@ -28,7 +28,7 @@ def _format_size(num_bytes: int) -> str:
     return f"{num_bytes:.1f} PB"
 
 
-async def search_files(query: str, max_results: int = 20, file_type: str = "", ctx: Context = None) -> str:
+async def search_files(query: str, max_results: int = 20, file_type: str = "", account_email: str = "", ctx: Context = None) -> str:
     """Search for files on Google Drive.
 
     Finds files matching a search query. Supports natural language searches
@@ -42,12 +42,13 @@ async def search_files(query: str, max_results: int = 20, file_type: str = "", c
         file_type: Filter by type: document, spreadsheet, presentation, folder, pdf, image, video, audio.
                    Note: file_type alone doesn't return all items of that type — you must also provide
                    a query to search for.
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
         Formatted search results with file names, sizes, dates, and IDs
     """
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
     max_results = max(1, min(max_results, 100))
 
     files = await drive.search(query, max_results=max_results, file_type=file_type)
@@ -62,7 +63,7 @@ async def search_files(query: str, max_results: int = 20, file_type: str = "", c
     return "\n".join(lines)
 
 
-async def list_folder(folder_id: str = "root", max_results: int = 50, ctx: Context = None) -> str:
+async def list_folder(folder_id: str = "root", max_results: int = 50, account_email: str = "", ctx: Context = None) -> str:
     """List contents of a Google Drive folder.
 
     Use this to discover what folders and files exist in a location. Shows immediate
@@ -72,12 +73,13 @@ async def list_folder(folder_id: str = "root", max_results: int = 50, ctx: Conte
     Args:
         folder_id: Folder ID to list (default "root" for My Drive root)
         max_results: Maximum results to return (default 50, max 100)
+        account_email: Google account to use. Leave empty to use the default account.
         ctx: MCP context
 
     Returns:
         Formatted list of folder contents with names, sizes, dates, and IDs
     """
-    drive = get_drive_service()
+    drive = get_drive_service(account_email)
     max_results = max(1, min(max_results, 100))
 
     files = await drive.list_children(folder_id, max_results=max_results)

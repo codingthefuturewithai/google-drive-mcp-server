@@ -10,22 +10,6 @@ Guide the user from a fresh clone to a working server. Be a knowledgeable teamma
 
 ---
 
-## What setup.py does (know this cold)
-
-`python scripts/setup.py` handles everything after the Google Console steps:
-
-1. Checks Docker is running
-2. Searches the user's Downloads, Desktop, Documents, and home folder for a `client_secret*.json` file and presents a numbered list — user picks one, no path typing required
-3. Copies it to the correct platform-specific config directory automatically
-4. Opens the browser for Google sign-in — automatically, no separate command
-5. Asks about port, download directory, and which local directories to mount
-6. Builds the Docker image, copies credentials into the container volume, starts the container, and waits for healthy
-7. Prints the exact `claude mcp add` command to run
-
-The user runs one script. The only thing left after it finishes is running the printed `claude mcp add` command.
-
----
-
 ## Phase 1 — Prerequisites
 
 Check silently, report only what needs attention.
@@ -105,9 +89,9 @@ Click **+ Create Credentials → OAuth client ID**:
 - Name: `Google Drive MCP`
 - Click **Create**
 
-In the dialog that appears, click **Download JSON**. The file will be named something like `client_secret_XXXXXXXX.apps.googleusercontent.com.json`.
+In the dialog that appears, click **Download JSON**. The file saves to their Downloads folder automatically.
 
-Confirm they have the file in their Downloads folder before moving on.
+Confirm they see the file in Downloads before moving on.
 
 ---
 
@@ -115,43 +99,49 @@ Confirm they have the file in their Downloads folder before moving on.
 
 Tell the user:
 
-> "From here, one script handles everything — it will find your downloaded file automatically, open your browser for Google sign-in, configure Docker, build the image, and start the server. You just answer a few questions."
+> "From here, one script handles everything — it finds your downloaded credentials automatically, opens your browser for Google sign-in (for each account you want to add), configures Docker, builds the image, and starts the server."
 
 ```bash
 python scripts/setup.py
 ```
 
-Walk them through what to expect at each prompt:
+**What setup.py does — walk them through each prompt as it appears:**
 
-**Step 1 — Docker check:** Confirms Docker is running. If it fails, Docker Desktop isn't open.
+**Credentials folder:** The script prints the path where it will store credentials and searches for the downloaded JSON. It will find it in Downloads automatically and show it as option 1. They press Enter to confirm.
 
-**Step 2 — Google Credentials:** The script will find the `client_secret*.json` file in Downloads and show a numbered list. They press `1` and Enter. Then their browser opens automatically for Google sign-in:
+**Google sign-in:** Browser opens automatically.
 - Sign in with the Google account whose Drive they want to access
 - They may see **"Google hasn't verified this app"** — this is normal for self-hosted tools. Click **Advanced → Go to Google Drive MCP Server (unsafe)**. "Unsafe" just means Google hasn't reviewed it in their marketplace — they created these credentials themselves.
 - Click **Allow**
 - Browser shows success, terminal continues automatically
 
-**Steps 3–5 — Port, download directory, directory mounts:** Accept the defaults or adjust as needed. Mounting the home directory (read-only) is recommended if they'll be uploading files from anywhere on their machine.
+**Additional accounts:** The script asks if they want to add more Google accounts. For each one: browser opens again, sign in, done. They can add as many as they want, or skip and add more later with `python scripts/add_account.py`.
 
-**Step 6 — Build and launch:** The script builds the Docker image (takes a minute the first time), copies credentials into the container, starts the server, and waits for it to be healthy. No input needed.
+**Port:** Accept the default unless they know port 19001 is already in use.
 
-**End of script:** Setup prints the exact `claude mcp add` command with the correct port. They copy and run that one command.
+**Download directory:** Where files downloaded from Drive will land locally. Accept the default (`~/Downloads/google_drive`) or enter a custom path.
+
+**Directory mounts:** Which local directories the server can read when uploading files to Drive. Mounting the home directory (read-only) covers everything. They can add more specific directories if preferred.
+
+**Build and launch:** The script builds the Docker image (takes a minute the first time), copies credentials into the container, starts the server, and waits for it to be healthy. No input needed.
+
+**End of script:** Setup prints the exact `claude mcp add` command. They copy and run it.
 
 ---
 
 ## Troubleshooting during setup.py
 
-**Client secret file not found in the numbered list:** The file isn't in Downloads, Desktop, Documents, or home. Ask them where they downloaded it. They can enter a custom path when the script offers that option.
+**Client secret file not found:** The file isn't in Downloads, Desktop, Documents, or home. Ask them where they downloaded it. The script offers a custom path option.
 
 **Browser doesn't open:** SSH session or headless machine. The terminal will print a URL — open it in any browser, authorize, come back.
 
 **"Access blocked" — Workspace account:** Their admin has restricted third-party OAuth apps. The admin goes to: Google Admin Console → Security → API Controls → App Access Control → find the OAuth Client ID → mark as **Trusted**. Offer to draft the message they can send their admin.
 
-**`redirect_uri_mismatch`:** Wrong application type was chosen — Web app instead of Desktop app. They need to go back to the Credentials page, create a new OAuth client ID with **Desktop app** type, download it, and re-run setup.
+**`redirect_uri_mismatch`:** Wrong application type — Web app instead of Desktop app. They need to go back to the Credentials page, create a new OAuth client ID with **Desktop app** type, download it, and re-run setup.
 
 **Docker build fails:** Read the error. Common causes: Docker daemon stopped mid-build (restart it), disk space issue, network error pulling base image.
 
-**Port conflict:** Another process is using the default port. The script will find the next available port automatically. If `GOOGLE_DRIVE_PORT` env var is set, it uses that.
+**Port conflict:** Another process is using the default port. The script finds the next available port automatically. If `GOOGLE_DRIVE_PORT` env var is set, it uses that.
 
 **If Google's UI has changed:** Search `"Google Cloud Console" [what they're trying to do] site:cloud.google.com` — find the current steps, tell the user exactly what to click. Never send them to search themselves.
 
@@ -182,4 +172,4 @@ Then confirm end-to-end: ask them to start a new Claude Code session and try ask
 
 Tell them when they're done:
 
-> "You're set. The server runs as a Docker container and restarts automatically. Your Google auth token refreshes silently — you won't need to re-authenticate. Use `python scripts/docker.py status` to check on it anytime."
+> "You're set. The server runs as a Docker container and restarts automatically. Your Google auth tokens refresh silently — you won't need to re-authenticate. To add another Google account later, ask me to help with that. Use `python scripts/docker.py status` to check on it anytime."
