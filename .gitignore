@@ -72,3 +72,6 @@ logs/
 
 # Stale standalone scripts
 test_correlation_id_integration.py
+
+# Google OAuth client credentials — never commit
+client_secret*.json

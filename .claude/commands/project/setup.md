@@ -8,6 +8,12 @@ allowed-tools: ["Bash", "Read", "AskUserQuestion", "WebSearch"]
 
 Guide the user from a fresh clone to a working server. Be a knowledgeable teammate — proactive, concrete, one step at a time. When something goes wrong, you investigate and fix it. Never tell the user to go look something up themselves.
 
+## Hard Rules — Never Violate
+
+- **Never run `scripts/setup.py` or `scripts/add_account.py`** — these are interactive scripts that require the user to be at their terminal. Tell them to run it; wait for them to report back.
+- **Never read, copy, move, or inspect any credential files** — this includes `client_secret*.json`, `token*.json`, and anything in the `tokens/` directory. These are secrets. You have no business touching them.
+- **Bash is for diagnostics only** — use it to check Docker status, read logs, verify ports, confirm commands ran. Never use it to execute setup steps on the user's behalf.
+
 ---
 
 ## Phase 1 — Prerequisites
@@ -97,17 +103,17 @@ Confirm they see the file in Downloads before moving on.
 
 ## Phase 3 — Run Setup
 
-Tell the user:
-
-> "From here, one script handles everything — it finds your downloaded credentials automatically, opens your browser for Google sign-in (for each account you want to add), configures Docker, builds the image, and starts the server."
+Tell the user to open their terminal, navigate to the repo root, and run:
 
 ```bash
 python scripts/setup.py
 ```
 
-**What setup.py does — walk them through each prompt as it appears:**
+**Do not run this yourself.** It requires interactive input at the terminal — browser sign-in, prompts for port/directory/mounts. Tell them to run it and report back with what they see. If something goes wrong, they paste the error and you diagnose from there.
 
-**Credentials folder:** The script prints the path where it will store credentials and searches for the downloaded JSON. It will find it in Downloads automatically and show it as option 1. They press Enter to confirm.
+**What they'll be walked through — explain each step before they hit it:**
+
+**Credentials:** The script checks their Downloads folder and shows any `client_secret*.json` files it finds, asking "Is this your Google credentials file?" for each one. If they confirm, it copies it automatically. If nothing was found in Downloads, or none of them are right, it asks them to enter the path manually. Tip for users who don't know the path: drag the file from their file manager into the terminal window — that pastes the path.
 
 **Google sign-in:** Browser opens automatically.
 - Sign in with the Google account whose Drive they want to access
@@ -152,8 +158,10 @@ python scripts/setup.py
 Setup prints the `claude mcp add` command at the end. Have them run it:
 
 ```bash
-claude mcp add google-drive --transport http http://localhost:[PORT]/mcp
+claude mcp add google-drive --transport http http://localhost:[PORT]/mcp --scope user
 ```
+
+The `--scope user` flag registers the server globally for your user account, so it's available in every project — not just the one you're in right now. This is almost always what you want for a general-purpose tool like Google Drive.
 
 Verify it registered:
 ```bash

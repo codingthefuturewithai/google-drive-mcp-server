@@ -161,65 +161,33 @@ def check_docker_running() -> bool:
     return False
 
 
-def find_client_secret_candidates() -> list:
-    """Search common download locations for client_secret JSON files."""
-    search_dirs = [
-        CONFIG_DIR,                      # Pre-created config dir — shown to user as save target
-        PROJECT_ROOT,                    # Repo root — common for developers
-        Path.home() / "Downloads",
-        Path.home() / "Desktop",
-        Path.home() / "Documents",
-        Path.home(),
-    ]
-    candidates = []
-    seen = set()
-    for d in search_dirs:
-        if d.is_dir():
-            for f in d.glob("client_secret*.json"):
-                if f not in seen:
-                    candidates.append(f)
-                    seen.add(f)
-    return candidates
-
-
 def copy_client_secret() -> bool:
-    """Find the downloaded client_secret.json and copy it into the config directory."""
+    """Locate the client_secret.json and copy it into the config directory."""
     dest = CONFIG_DIR / "client_secret.json"
-    candidates = find_client_secret_candidates()
+
+    # Check the standard Downloads folder (cross-platform: ~/Downloads exists on
+    # macOS, Linux, and Windows).
+    downloads = Path.home() / "Downloads"
+    candidates = sorted(downloads.glob("client_secret*.json")) if downloads.is_dir() else []
+
+    src = None
 
     if candidates:
-        print_info("Found the following client secret file(s):")
+        print_info(f"Found the following file(s) in your Downloads folder:")
         print()
-        for i, f in enumerate(candidates, 1):
-            print(f"  {Colors.CYAN}[{i}]{Colors.RESET} {f}")
-        if len(candidates) > 1:
-            print(f"  {Colors.CYAN}[{len(candidates)+1}]{Colors.RESET} Enter a different path")
+        for f in candidates:
+            print(f"  {Colors.CYAN}{f.name}{Colors.RESET}")
+            if prompt_yes_no(f"  Is this your Google credentials file?", default=False):
+                src = f
+                break
         print()
 
-        while True:
-            choice = input(f"  Select a file [1]: ").strip()
-            if not choice:
-                choice = "1"
-            if choice.isdigit():
-                idx = int(choice)
-                if 1 <= idx <= len(candidates):
-                    src = candidates[idx - 1]
-                    break
-                if idx == len(candidates) + 1:
-                    src = None
-                    break
-            print_warning("Invalid choice. Enter a number from the list.")
-
-        if src is None:
-            # Fall through to manual entry
-            candidates = []
-
-    if not candidates:
-        print_info("Enter the full path to your downloaded client secret file.")
-        print_info("It will be named something like: client_secret_XXXX.apps.googleusercontent.com.json")
+    if src is None:
+        print_info("Please enter the full path to your client_secret JSON file.")
+        print_info("Tip: drag the file into this terminal window to paste the path.")
         print()
         while True:
-            raw = input("  Path: ").strip()
+            raw = input("  Path: ").strip().strip("'\"")
             if not raw:
                 print_warning("No path entered.")
                 continue
@@ -235,7 +203,7 @@ def copy_client_secret() -> bool:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     try:
         shutil.copy2(src, dest)
-        print_success(f"Credentials copied to {dest}")
+        print_success("Credentials saved.")
         return True
     except Exception as e:
         print_error(f"Could not copy file: {e}")
@@ -287,8 +255,9 @@ def setup_google_accounts() -> bool:
         print("    1. Go to https://console.cloud.google.com/")
         print("    2. Select your project (or create one)")
         print("    3. Enable the Google Drive API")
-        print("    4. Go to Credentials → Create Credentials → OAuth client ID")
-        print("    5. Choose Desktop app → download the JSON file")
+        print("    4. Configure the OAuth Consent Screen (choose External, fill required fields only)")
+        print("    5. Go to Credentials → Create Credentials → OAuth client ID")
+        print("    6. Choose Desktop app → download the JSON file")
         print()
 
         if not prompt_yes_no("Do you have the downloaded file ready?"):
@@ -645,7 +614,9 @@ def main():
     print()
     print_info("Connect it to Claude Code by running this command:")
     print()
-    print(f"  {Colors.CYAN}claude mcp add google-drive --transport http http://localhost:{port}/mcp{Colors.RESET}")
+    print(f"  {Colors.CYAN}claude mcp add google-drive --transport http http://localhost:{port}/mcp --scope user{Colors.RESET}")
+    print()
+    print_info("The --scope user flag makes it available in all your projects, not just the current one.")
     print()
     print_info("Useful commands going forward:")
     print(f"  {Colors.CYAN}python scripts/docker.py status{Colors.RESET}   — check if the server is running")

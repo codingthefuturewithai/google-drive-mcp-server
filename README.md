@@ -2,9 +2,17 @@
 
 An MCP (Model Context Protocol) server that gives AI coding assistants the ability to search, browse, download, upload, and organize files on Google Drive. Binary content never enters the MCP protocol — files are transferred to/from the local filesystem.
 
-## Getting Started with AI Assistants
+## Getting Started
 
-If you're using this server with an AI coding assistant (Claude Code, Cline, etc.), start here:
+If you're using Claude Code, the fastest path from clone to working server is:
+
+```
+/setup
+```
+
+This walks you through everything — Google Cloud credentials, OAuth sign-in, Docker build, and server registration. No prior setup knowledge needed.
+
+Other useful slash commands:
 
 | Command | What it does |
 |---------|-------------|
@@ -12,8 +20,6 @@ If you're using this server with an AI coding assistant (Claude Code, Cline, etc
 | `/getting-started` | Interactive guided tour — choose your path based on experience level |
 | `/add-tool "description"` | Design and implement a new MCP tool with planning step |
 | `/generate-tests tool_name` | Auto-generate unit and integration tests for a tool |
-
-These slash commands are the fastest way to understand what the server can do and how to use it.
 
 ## Quick Start for MCP Clients
 
@@ -26,8 +32,9 @@ Before running any setup commands, download your OAuth credentials from Google C
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project (or select an existing one)
 3. Enable the **Google Drive API**
-4. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
-5. Choose **Desktop app**, then download the JSON file
+4. Configure the **OAuth Consent Screen** (choose External, fill required fields only)
+5. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
+6. Choose **Desktop app**, then download the JSON file
 
 Keep that downloaded file somewhere you can find it — the setup script will ask for its location and copy it into the right place automatically.
 
@@ -39,26 +46,22 @@ cd google_drive
 uv sync
 ```
 
-### 3a. Option A — Run directly (STDIO)
+**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker Desktop (or Docker Engine on Linux)
+
+### 3. Run setup
 
 ```bash
-# Add to Claude Code
-claude mcp add google-drive -- uv run --directory /path/to/google_drive python -m google_drive
+python scripts/setup.py
 ```
 
-**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
+The setup script walks you through everything:
+- Finds your downloaded credentials (checks Downloads, or asks for the path)
+- Opens your browser for Google sign-in (supports multiple accounts)
+- Configures the Docker container (port, download directory, file access mounts)
+- Builds the Docker image and starts the server
+- Prints the exact `claude mcp add` command to register the server
 
-### 3b. Option B — Run via Docker container (Streamable HTTP)
-
-```bash
-# Build and start the container
-python scripts/docker.py start
-
-# Add to Claude Code (use the port shown in the output)
-claude mcp add google-drive --transport http http://localhost:19001/mcp
-```
-
-The Docker manager handles building the image, copying your OAuth credentials into the container volume, health checking, and port assignment. Manage the container with:
+Manage the container afterward with:
 
 ```bash
 python scripts/docker.py status   # Check if running
@@ -67,8 +70,6 @@ python scripts/docker.py restart  # Restart without rebuild
 python scripts/docker.py update   # Rebuild and restart (after code changes)
 python scripts/docker.py stop     # Stop and remove container
 ```
-
-**Prerequisites:** Docker Desktop (or Docker Engine on Linux)
 
 ### 4. Start using the tools
 
@@ -86,11 +87,12 @@ Once configured, you can ask your AI assistant to:
 | **search_files** | Search by name or with structured Drive API queries |
 | **list_folder** | List folder contents with folders sorted first |
 | **download_file** | Download/export files to local filesystem |
-| **upload_file** | Upload local files to Drive |
+| **create_file** | Upload a local file to Drive |
+| **update_file** | Replace content of an existing file on Drive |
 | **get_file_info** | Get detailed file metadata |
 | **create_folder** | Create folders on Drive |
 
-For full parameter details, run `/server-overview` from your AI assistant or see [SETUP_PROMPT.md](SETUP_PROMPT.md).
+For full parameter details, run `/server-overview` from your AI assistant.
 
 ## Features
 
@@ -139,10 +141,6 @@ Downloads go to `~/Downloads/google_drive/` by default (configurable).
 ## Development
 
 For development setup, testing, and contribution guidelines, see [DEVELOPMENT.md](DEVELOPMENT.md).
-
-## AI Assistant Configuration
-
-For detailed setup instructions for AI coding assistants, see [SETUP_PROMPT.md](SETUP_PROMPT.md).
 
 ## Requirements
 
